@@ -531,7 +531,8 @@ function settingsSheet() {
     <div class="kv"><span>Versão das telas</span><span>${s.webVersion ?? '–'}</span></div>
     <div class="kv"><span>Atualização</span><span id="s-update-text"></span></div>
     <div class="sheet-actions" style="margin-top:16px">
-      ${s.adb !== 'ok' ? `<button class="sheet-btn primary" id="s-retry">${icon('refresh')}Tentar conectar de novo</button>` : ''}
+      ${s.adb !== 'ok' ? `<button class="sheet-btn primary" id="s-retry">${icon('refresh')}Tentar conectar de novo</button>
+      <button class="sheet-btn" id="s-probe">${icon('search')}Diagnóstico detalhado</button>` : ''}
       ${s.updatePending ? `<button class="sheet-btn primary" id="s-install">${icon('download')}Instalar atualização baixada</button>` : ''}
       <button class="sheet-btn primary" id="s-update">${icon('download')}Procurar atualização</button>
       <button class="sheet-btn danger" id="s-logout">${icon('logout')}Desconectar este celular</button>
@@ -547,6 +548,7 @@ function settingsSheet() {
       setTimeout(async () => { await refreshStatus(); settingsSheet(); }, 4000);
     } catch (e) { toast(e.message, true); }
   });
+  sheetButton(sheet, 's-probe', probeSheet);
   sheetButton(sheet, 's-install', async () => {
     try {
       await api('/api/update/install', {});
@@ -564,6 +566,20 @@ function settingsSheet() {
   });
   sheetButton(sheet, 's-logout', () => { closeSheet(); logout(); });
 }
+async function probeSheet() {
+  const sheet = openSheet(`
+    <div class="sheet-head"><div><h3>Diagnóstico do ADB</h3><p>Olhe a TV: se aparecer "Permitir depuração?", aceite</p></div></div>
+    <pre class="report" id="s-report">Testando… pode levar até 1 minuto.</pre>
+    <div class="sheet-actions"><button class="sheet-btn" id="s-close">${icon('x')}Fechar</button></div>`);
+  sheetButton(sheet, 's-close', closeSheet);
+  try {
+    const { report } = await api('/api/adb/probe', {});
+    sheet.querySelector('#s-report').textContent = report;
+  } catch (e) {
+    sheet.querySelector('#s-report').textContent = e.message;
+  }
+}
+
 $('open-settings').addEventListener('click', settingsSheet);
 $('status-pill').addEventListener('click', settingsSheet);
 

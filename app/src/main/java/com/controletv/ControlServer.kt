@@ -124,6 +124,8 @@ class ControlServer(
                 ok()
             }
 
+            path == "/api/adb/probe" && post -> ok(JSONObject().put("report", AdbProbe.run(context)))
+
             path == "/api/adb/retry" && post -> {
                 Adb.retryNow()
                 ok()

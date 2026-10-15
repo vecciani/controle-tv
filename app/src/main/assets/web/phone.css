@@ -264,3 +264,8 @@ main { padding: 4px 16px calc(96px + env(safe-area-inset-bottom)); }
 .toast.bad { border-color: rgba(248, 113, 113, .5); }
 
 .kv .mono { font: 12px/1.4 ui-monospace, Menlo, monospace; color: var(--warn); word-break: break-word; }
+.report {
+  margin: 0 0 14px; padding: 12px; border-radius: 12px; background: var(--surface); border: 1px solid var(--line);
+  font: 12px/1.5 ui-monospace, Menlo, monospace; color: var(--text); white-space: pre-wrap; word-break: break-word;
+  user-select: text; -webkit-user-select: text;
+}
