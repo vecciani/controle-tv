@@ -19,7 +19,7 @@ rm -rf "$OUT" && mkdir -p "$OUT"
 
 ./gradlew -q assembleDebug
 cp app/build/outputs/apk/debug/app-debug.apk "$OUT/controle-tv.apk"
-(cd app/src/main/assets/web && zip -qr "../../../../../$OUT/web.zip" .)
+(cd app/src/main/assets/web && zip -qr "../../../../../$OUT/web.zip" . -x ".DS_Store")
 cat > "$OUT/update.json" <<JSON
 {
   "apkVersion": $APK_VERSION,
