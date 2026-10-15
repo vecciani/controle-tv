@@ -262,3 +262,5 @@ main { padding: 4px 16px calc(96px + env(safe-area-inset-bottom)); }
 }
 .toast.show { opacity: 1; transform: translate(-50%, 0); }
 .toast.bad { border-color: rgba(248, 113, 113, .5); }
+
+.kv .mono { font: 12px/1.4 ui-monospace, Menlo, monospace; color: var(--warn); word-break: break-word; }

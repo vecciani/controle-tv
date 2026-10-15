@@ -204,7 +204,7 @@ function showTab(tab) {
 const STATUS = {
   ok: ['ok', 'Controle total'],
   waiting: ['warn', 'Aceite na TV'],
-  off: ['off', 'ADB desligado'],
+  off: ['off', 'ADB indisponível'],
 };
 
 async function refreshStatus() {
@@ -525,14 +525,34 @@ function settingsSheet() {
     <div class="sheet-head"><div><h3>Ajustes</h3><p>Controle TV</p></div></div>
     <div class="kv"><span>Controle</span><span><span class="dot ${dot}"></span> ${text}</span></div>
     ${ADB_HELP[s.adb] ? `<p class="body" style="margin-top:12px">Para liberar o controle completo:</p>${ADB_HELP[s.adb]}` : ''}
+    ${s.adbError ? `<div class="kv"><span>Detalhe</span><span class="mono" id="s-adb-error"></span></div>` : ''}
+    <div class="kv"><span>Aparelho</span><span id="s-device"></span></div>
     <div class="kv"><span>Versão do app</span><span>${s.version ?? '–'}</span></div>
     <div class="kv"><span>Versão das telas</span><span>${s.webVersion ?? '–'}</span></div>
     <div class="kv"><span>Atualização</span><span id="s-update-text"></span></div>
     <div class="sheet-actions" style="margin-top:16px">
+      ${s.adb !== 'ok' ? `<button class="sheet-btn primary" id="s-retry">${icon('refresh')}Tentar conectar de novo</button>` : ''}
+      ${s.updatePending ? `<button class="sheet-btn primary" id="s-install">${icon('download')}Instalar atualização baixada</button>` : ''}
       <button class="sheet-btn primary" id="s-update">${icon('download')}Procurar atualização</button>
       <button class="sheet-btn danger" id="s-logout">${icon('logout')}Desconectar este celular</button>
     </div>`);
   sheet.querySelector('#s-update-text').textContent = s.update || '–';
+  sheet.querySelector('#s-device').textContent = s.device || '–';
+  const adbError = sheet.querySelector('#s-adb-error');
+  if (adbError) adbError.textContent = s.adbError;
+  sheetButton(sheet, 's-retry', async () => {
+    toast('Tentando conectar…');
+    try {
+      await api('/api/adb/retry', {});
+      setTimeout(async () => { await refreshStatus(); settingsSheet(); }, 4000);
+    } catch (e) { toast(e.message, true); }
+  });
+  sheetButton(sheet, 's-install', async () => {
+    try {
+      await api('/api/update/install', {});
+      toast('Confirme a instalação na TV');
+    } catch (e) { toast(e.message, true); }
+  });
   sheetButton(sheet, 's-update', async () => {
     toast('Procurando…');
     try {

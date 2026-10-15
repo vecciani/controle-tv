@@ -24,6 +24,8 @@ class ControlServer(
         route(session)
     } catch (e: Adb.Unavailable) {
         error(Response.Status.CONFLICT, e.message)
+    } catch (e: IllegalStateException) {
+        error(Response.Status.CONFLICT, e.message)
     } catch (e: IllegalArgumentException) {
         error(Response.Status.BAD_REQUEST, e.message)
     } catch (e: Exception) {
@@ -117,6 +119,16 @@ class ControlServer(
 
             path == "/api/update" && post -> ok(JSONObject().put("result", Updater.check(context)))
 
+            path == "/api/update/install" && post -> {
+                Updater.installPending(context)
+                ok()
+            }
+
+            path == "/api/adb/retry" && post -> {
+                Adb.retryNow()
+                ok()
+            }
+
             path == "/api/qr.png" && local -> {
                 val png = Qr.png("${Net.url()}/?pin=${pairing.pin}", 480)
                 newFixedLengthResponse(Response.Status.OK, "image/png", png.inputStream(), png.size.toLong())
@@ -132,6 +144,9 @@ class ControlServer(
             .put("version", BuildConfig.VERSION_CODE)
             .put("webVersion", WebFiles.version(context))
             .put("update", Updater.lastResult)
+            .put("updatePending", Updater.pending != null)
+            .put("adbError", Adb.lastError)
+            .put("device", "${android.os.Build.MODEL} · Android ${android.os.Build.VERSION.RELEASE} (API ${android.os.Build.VERSION.SDK_INT})")
         foreground()?.let { pkg ->
             json.put("foreground", JSONObject().put("pkg", pkg).put("label", Apps.label(context, pkg)))
         }

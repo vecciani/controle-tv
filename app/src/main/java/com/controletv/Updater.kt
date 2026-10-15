@@ -20,6 +20,11 @@ object Updater {
     var lastResult = "Nunca verificado"
         private set
 
+    /** APK downloaded but waiting for the user to confirm it on the TV (no ADB). */
+    @Volatile
+    var pending: File? = null
+        private set
+
     @Synchronized
     fun check(context: Context): String {
         if (BuildConfig.UPDATE_URL.isEmpty()) return "Atualização automática não configurada".also { lastResult = it }
@@ -35,8 +40,13 @@ object Updater {
             if (info.getInt("apkVersion") > BuildConfig.VERSION_CODE) {
                 val apk = File(context.cacheDir, "update.apk")
                 apk.writeBytes(download(info.getString("apk")))
-                messages += "App v${info.getInt("apkVersion")} instalando"
-                Adb.install(apk) // the process is replaced here when the install succeeds
+                if (Adb.state == Adb.State.OK) {
+                    messages += "App v${info.getInt("apkVersion")} instalando"
+                    Adb.install(apk) // the process is replaced here when the install succeeds
+                } else {
+                    pending = apk
+                    messages += "App v${info.getInt("apkVersion")} baixado. Confirme a instalação na TV"
+                }
             }
 
             messages.joinToString(". ").ifEmpty { "Tudo atualizado" }
@@ -45,6 +55,12 @@ object Updater {
             "Falha ao atualizar: ${e.message}"
         }
         return lastResult
+    }
+
+    /** Opens the system installer for a downloaded update. */
+    fun installPending(context: Context) {
+        val apk = pending ?: throw IllegalStateException("Nenhuma atualização baixada")
+        Installer.prompt(context, apk)
     }
 
     fun startPeriodicChecks(context: Context) {

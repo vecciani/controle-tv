@@ -9,6 +9,8 @@
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <!-- Sideloaded app: needs to see every installed app to list, close and uninstall them -->
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
+    <!-- Fallback updates through the system installer when ADB is unavailable -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <uses-feature android:name="android.software.leanback" android:required="false" />
     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
@@ -49,6 +51,10 @@
                 android:name="android.view.im"
                 android:resource="@xml/method" />
         </service>
+
+        <receiver
+            android:name=".InstallReceiver"
+            android:exported="false" />
 
         <receiver
             android:name=".BootReceiver"

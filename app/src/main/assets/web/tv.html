@@ -80,6 +80,11 @@
   .connect.big .pin { font-size: 4vw; }
   body.first .rows, body.first .floor { opacity: .15; }
 
+  .update-banner {
+    position: fixed; left: 50%; bottom: 5vh; transform: translateX(-50%); z-index: 3;
+    padding: 1.6vh 2.4vw; border-radius: 999px; font-size: 1.4vw;
+    background: var(--neon); color: var(--bg); box-shadow: 0 0 3vw rgba(34, 211, 238, .5);
+  }
   .toast {
     position: fixed; left: 50%; top: 5vh; transform: translate(-50%, -2vh); opacity: 0; transition: .25s;
     padding: 1.2vh 2vw; border-radius: 999px; font-size: 1.3vw; background: var(--surface-2);
@@ -119,6 +124,7 @@
 </div>
 
 
+<div class="update-banner" id="update-banner" hidden>Nova versão do Controle TV pronta. Aperte <b>OK</b> para instalar.</div>
 <div class="toast" id="toast"></div>
 
 <script src="icons.js"></script>
@@ -198,7 +204,14 @@ function paintFocus() {
   strip.scrollLeft = el.offsetLeft - strip.clientWidth / 2 + el.clientWidth / 2;
 }
 
+let updatePending = false;
+
 document.addEventListener('keydown', async (e) => {
+  if (updatePending && e.key === 'Enter') {
+    e.preventDefault();
+    api('/api/update/install', {}).catch((err) => toast(err.message));
+    return;
+  }
   if (!rows.length) return;
   const moves = { ArrowLeft: [0, -1], ArrowRight: [0, 1], ArrowUp: [-1, 0], ArrowDown: [1, 0] };
   if (moves[e.key]) {
@@ -220,7 +233,7 @@ document.addEventListener('keydown', async (e) => {
 const ADB = {
   ok: ['ok', 'Controle total'],
   waiting: ['warn', 'Aceite "Permitir depuração"'],
-  off: ['off', 'Ative a Depuração ADB'],
+  off: ['off', 'ADB indisponível'],
 };
 
 async function refreshStatus() {
@@ -232,6 +245,8 @@ async function refreshStatus() {
     $('phone-dot').className = `dot ${s.phoneActive ? 'ok' : ''}`;
     $('phone-text').textContent = s.phoneActive ? 'Celular conectado' : s.paired ? 'Celular pareado' : 'Nenhum celular';
 
+    updatePending = !!s.updatePending;
+    $('update-banner').hidden = !updatePending;
     const first = !s.paired;
     document.body.classList.toggle('first', first);
     const card = $('connect');
