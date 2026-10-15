@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#0F172A">
+<title>Controle TV</title>
+<style>
+  :root {
+    --bg: #0F172A;
+    --surface: #1E293B;
+    --surface-hi: #334155;
+    --text: #F8FAFC;
+    --muted: #94A3B8;
+    --accent: #38BDF8;
+    --danger: #FCA5A5;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; background: var(--bg); color: var(--text);
+    font: 16px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  body { min-height: 100dvh; padding: env(safe-area-inset-top) 16px calc(16px + env(safe-area-inset-bottom)); }
+  svg.icon { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 2;
+    stroke-linecap: round; stroke-linejoin: round; flex-shrink: 0; }
+  button { font: inherit; color: inherit; border: 0; background: none; cursor: pointer; }
+
+  header { display: flex; align-items: center; gap: 10px; padding: 16px 0; }
+  header h1 { font-size: 20px; margin: 0; flex: 1; }
+  header .brand { color: var(--accent); display: flex; }
+  .icon-btn { width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center;
+    background: var(--surface); }
+  .icon-btn:active { background: var(--surface-hi); }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; }
+  .tile { display: flex; flex-direction: column; gap: 6px; text-align: left; padding: 0; }
+  .tile .art { aspect-ratio: 16 / 9; width: 100%; border-radius: 12px; background: var(--surface);
+    display: grid; place-items: center; overflow: hidden; transition: transform .08s; }
+  .tile .art img { width: 100%; height: 100%; object-fit: contain; }
+  .tile:active .art { transform: scale(.95); outline: 2px solid var(--accent); }
+  .tile .label { font-size: 13px; color: var(--muted); white-space: nowrap; overflow: hidden;
+    text-overflow: ellipsis; }
+
+  .pair { max-width: 360px; margin: 18vh auto 0; text-align: center; }
+  .pair .lock { color: var(--accent); margin-bottom: 8px; }
+  .pair .lock svg { width: 48px; height: 48px; }
+  .pair p { color: var(--muted); }
+  .pair input { width: 100%; font-size: 32px; letter-spacing: 12px; text-align: center; padding: 14px;
+    border-radius: 12px; border: 2px solid var(--surface-hi); background: var(--surface); color: var(--text); }
+  .pair input:focus { outline: none; border-color: var(--accent); }
+  .pair button { margin-top: 12px; width: 100%; padding: 14px; border-radius: 12px; background: var(--accent);
+    color: var(--bg); font-weight: 700; }
+  .error { color: var(--danger); min-height: 1.4em; }
+
+  .empty { color: var(--muted); text-align: center; margin-top: 30vh; }
+  .toast { position: fixed; left: 50%; bottom: calc(24px + env(safe-area-inset-bottom));
+    transform: translate(-50%, 20px); opacity: 0; background: var(--surface-hi); padding: 10px 16px;
+    border-radius: 999px; transition: .2s; pointer-events: none; white-space: nowrap; }
+  .toast.show { opacity: 1; transform: translate(-50%, 0); }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+
+<section id="pair" class="pair" hidden>
+  <div class="lock">
+    <svg class="icon" viewBox="0 0 24 24"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+  </div>
+  <h2>Conectar à TV</h2>
+  <p>Digite o PIN que aparece na tela do Fire TV.</p>
+  <form id="pair-form">
+    <input id="pin" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="off" placeholder="0000">
+    <button type="submit">Conectar</button>
+  </form>
+  <p class="error" id="pair-error"></p>
+</section>
+
+<main id="main" hidden>
+  <header>
+    <span class="brand">
+      <svg class="icon" viewBox="0 0 24 24"><rect width="20" height="15" x="2" y="7" rx="2" ry="2"/><polyline points="17 2 12 7 7 2"/></svg>
+    </span>
+    <h1>Controle TV</h1>
+    <button class="icon-btn" id="refresh" aria-label="Atualizar">
+      <svg class="icon" viewBox="0 0 24 24"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>
+    </button>
+  </header>
+  <div class="grid" id="apps"></div>
+  <p class="empty" id="empty" hidden>Carregando apps...</p>
+</main>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+
+const store = {
+  get(key) { try { return localStorage.getItem(key); } catch { return null; } },
+  set(key, value) { try { localStorage.setItem(key, value); } catch {} },
+  remove(key) { try { localStorage.removeItem(key); } catch {} },
+};
+
+let token = store.get('token');
+
+async function api(path, body) {
+  const res = await fetch(path, {
+    method: body ? 'POST' : 'GET',
+    headers: { 'Content-Type': 'application/json', 'X-Token': token || '' },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (res.status === 401) { logout(); throw new Error('Não pareado'); }
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Erro');
+  return data;
+}
+
+function toast(message) {
+  const el = $('toast');
+  el.textContent = message;
+  el.classList.add('show');
+  clearTimeout(toast.timer);
+  toast.timer = setTimeout(() => el.classList.remove('show'), 1600);
+}
+
+function logout() {
+  token = null;
+  store.remove('token');
+  showPair();
+}
+
+function showPair() {
+  $('main').hidden = true;
+  $('pair').hidden = false;
+}
+
+async function pair(pin) {
+  $('pair-error').textContent = '';
+  try {
+    const data = await api('/api/pair', { pin });
+    token = data.token;
+    store.set('token', token);
+    history.replaceState(null, '', '/');
+    showMain();
+  } catch (e) {
+    $('pair-error').textContent = e.message;
+  }
+}
+
+async function showMain() {
+  $('pair').hidden = true;
+  $('main').hidden = false;
+  await loadApps();
+}
+
+async function loadApps() {
+  const grid = $('apps');
+  $('empty').hidden = false;
+  $('empty').textContent = 'Carregando apps...';
+  try {
+    const { apps } = await api('/api/apps');
+    grid.replaceChildren(...apps.map(appTile));
+    $('empty').hidden = apps.length > 0;
+    $('empty').textContent = 'Nenhum app encontrado.';
+  } catch (e) {
+    $('empty').textContent = 'Não foi possível falar com a TV.';
+  }
+}
+
+function appTile(app) {
+  const btn = document.createElement('button');
+  btn.className = 'tile';
+  const art = document.createElement('span');
+  art.className = 'art';
+  const img = document.createElement('img');
+  img.loading = 'lazy';
+  img.alt = '';
+  img.src = `/api/icon?pkg=${encodeURIComponent(app.pkg)}&token=${encodeURIComponent(token)}`;
+  art.append(img);
+  const label = document.createElement('span');
+  label.className = 'label';
+  label.textContent = app.label;
+  btn.append(art, label);
+  btn.addEventListener('click', () => launch(app));
+  return btn;
+}
+
+async function launch(app) {
+  navigator.vibrate?.(15);
+  try {
+    const { ok } = await api('/api/launch', { pkg: app.pkg });
+    toast(ok ? `Abrindo ${app.label}` : `Não deu para abrir ${app.label}`);
+  } catch (e) {
+    toast(e.message);
+  }
+}
+
+$('pair-form').addEventListener('submit', (e) => {
+  e.preventDefault();
+  pair($('pin').value.trim());
+});
+$('refresh').addEventListener('click', loadApps);
+
+const pinFromQr = new URLSearchParams(location.search).get('pin');
+if (pinFromQr) pair(pinFromQr);
+else if (token) showMain();
+else showPair();
+</script>
+</body>
+</html>
