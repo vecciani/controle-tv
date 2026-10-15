@@ -40,7 +40,7 @@ object Updater {
             if (info.getInt("apkVersion") > BuildConfig.VERSION_CODE) {
                 val apk = File(context.cacheDir, "update.apk")
                 apk.writeBytes(download(info.getString("apk")))
-                if (Adb.state == Adb.State.OK) {
+                if (Adb.via == "tv") {
                     messages += "App v${info.getInt("apkVersion")} instalando"
                     Adb.install(apk) // the process is replaced here when the install succeeds
                 } else {

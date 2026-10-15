@@ -36,6 +36,9 @@ class ControlServer(
         val path = session.uri
         if (!path.startsWith("/api/")) return page(path)
 
+        // Lets the phone app find the TV on the network
+        if (path == "/api/hello") return ok(JSONObject().put("app", "controle-tv").put("name", android.os.Build.MODEL))
+
         if (path == "/api/pair" && session.method == Method.POST) {
             val token = pairing.pair(body(session).optString("pin"))
                 ?: return error(Response.Status.FORBIDDEN, "PIN errado")
@@ -124,6 +127,19 @@ class ControlServer(
                 ok()
             }
 
+            path == "/api/relay/next" -> {
+                val state = runCatching { Adb.State.valueOf(session.parameters["adb"]?.firstOrNull()?.uppercase() ?: "OFF") }
+                    .getOrDefault(Adb.State.OFF)
+                val job = PhoneRelay.next(state, session.parameters["error"]?.firstOrNull())
+                ok(if (job == null) JSONObject() else JSONObject().put("id", job.first).put("command", job.second))
+            }
+
+            path == "/api/relay/result" && post -> {
+                val body = body(session)
+                PhoneRelay.result(body.getLong("id"), body.optString("output", null), body.optString("error", null))
+                ok()
+            }
+
             path == "/api/adb/probe" && post -> ok(JSONObject().put("report", AdbProbe.run(context)))
 
             path == "/api/adb/retry" && post -> {
@@ -143,6 +159,7 @@ class ControlServer(
     private fun status(local: Boolean): JSONObject {
         val json = JSONObject()
             .put("adb", Adb.state.name.lowercase())
+            .put("via", Adb.via)
             .put("version", BuildConfig.VERSION_CODE)
             .put("webVersion", WebFiles.version(context))
             .put("update", Updater.lastResult)

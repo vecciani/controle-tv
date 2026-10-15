@@ -24,14 +24,36 @@ object Adb {
         }
     )
 
+    /** The TV's own connection. Blocked by Amazon on recent Fire OS, so usually OFF. */
     @Volatile
-    var state = State.OFF
-        private set
+    private var localState = State.OFF
 
-    /** Why the last connection attempt failed, shown in the phone's settings. */
+    /** Whether ADB commands can run, either locally or through the phone app. */
+    val state: State
+        get() = when {
+            localState == State.OK || PhoneRelay.ready -> State.OK
+            PhoneRelay.connected && PhoneRelay.phoneState == State.WAITING -> State.WAITING
+            else -> State.OFF
+        }
+
+    /** Who is running the commands, for the status screens. */
+    val via: String?
+        get() = when {
+            localState == State.OK -> "tv"
+            PhoneRelay.ready -> "celular"
+            else -> null
+        }
+
     @Volatile
-    var lastError: String? = "Iniciando"
-        private set
+    private var localError: String? = "Iniciando"
+
+    /** Why ADB isn't available, shown in the phone's settings. */
+    val lastError: String?
+        get() = when {
+            state == State.OK -> null
+            PhoneRelay.connected -> "Celular: ${PhoneRelay.phoneError ?: "conectando"}"
+            else -> "Abra o app Controle TV no celular. (Na TV: ${localError ?: "-"})"
+        }
 
     private var dadb: Dadb? = null
     private lateinit var keys: AdbKeyPair
@@ -48,13 +70,18 @@ object Adb {
             connectInBackground()
         } catch (e: Throwable) {
             Log.e(TAG, "key setup failed", e)
-            lastError = "Falha ao criar a chave ADB: ${describe(e)}"
+            localError = "Falha ao criar a chave ADB: ${describe(e)}"
         }
     }
 
     /** Runs a shell command on the TV and returns its output. */
-    @Synchronized
     fun shell(command: String): String {
+        if (localState != State.OK && PhoneRelay.ready) return PhoneRelay.exec(command)
+        return localShell(command)
+    }
+
+    @Synchronized
+    private fun localShell(command: String): String {
         val connection = dadb ?: throw Unavailable(state)
         return try {
             connection.shell(command).allOutput
@@ -80,7 +107,7 @@ object Adb {
     private fun drop() {
         runCatching { dadb?.close() }
         dadb = null
-        state = State.OFF
+        localState = State.OFF
         connectInBackground()
     }
 
@@ -99,15 +126,14 @@ object Adb {
                 for (host in listOfNotNull("127.0.0.1", Net.localIp()).distinct()) {
                     try {
                         // No read timeout: waits as long as the "allow debugging" prompt is open
-                        state = State.WAITING
                         Dadb.create(host, PORT, keys, CONNECT_TIMEOUT, 0).use { it.shell("echo ok") }
                         // Authorized: reopen with a read timeout so a stuck command can't hang requests
                         val ready = Dadb.create(host, PORT, keys, CONNECT_TIMEOUT, READ_TIMEOUT)
                         ready.shell("echo ok")
                         synchronized(this) {
                             dadb = ready
-                            state = State.OK
-                            lastError = null
+                            localState = State.OK
+                            localError = null
                         }
                         break
                     } catch (e: ConnectException) {
@@ -118,8 +144,8 @@ object Adb {
                     }
                 }
                 if (dadb == null) {
-                    state = State.OFF
-                    lastError = errors.joinToString(" · ")
+                    localState = State.OFF
+                    localError = errors.joinToString(" · ")
                     synchronized(wake) { wake.wait(RETRY_MS) }
                 }
             }
@@ -136,5 +162,5 @@ object Adb {
     private const val PORT = 5555
     private const val CONNECT_TIMEOUT = 3_000
     private const val READ_TIMEOUT = 20_000
-    private const val RETRY_MS = 10_000L
+    private const val RETRY_MS = 60_000L
 }

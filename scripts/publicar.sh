@@ -11,24 +11,28 @@ export JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home
 
 APK_VERSION=$(grep '^apkVersion=' versao.properties | cut -d= -f2)
 WEB_VERSION=$(grep '^webVersion=' versao.properties | cut -d= -f2)
+PHONE_VERSION=$(grep '^phoneVersion=' versao.properties | cut -d= -f2)
 REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner)
-TAG="v$APK_VERSION.$WEB_VERSION"
+TAG="v$APK_VERSION.$WEB_VERSION.$PHONE_VERSION"
 BASE="https://github.com/$REPO/releases/latest/download"
 OUT=build/release
 rm -rf "$OUT" && mkdir -p "$OUT"
 
 ./gradlew -q assembleDebug
 cp app/build/outputs/apk/debug/app-debug.apk "$OUT/controle-tv.apk"
+cp phone/build/outputs/apk/debug/phone-debug.apk "$OUT/controle-tv-celular.apk"
 (cd app/src/main/assets/web && zip -qr "../../../../../$OUT/web.zip" . -x ".DS_Store")
 cat > "$OUT/update.json" <<JSON
 {
   "apkVersion": $APK_VERSION,
   "webVersion": $WEB_VERSION,
+  "phoneVersion": $PHONE_VERSION,
+  "phone": "$BASE/controle-tv-celular.apk",
   "apk": "$BASE/controle-tv.apk",
   "web": "$BASE/web.zip"
 }
 JSON
 
-gh release create "$TAG" "$OUT/controle-tv.apk" "$OUT/web.zip" "$OUT/update.json" \
+gh release create "$TAG" "$OUT/controle-tv.apk" "$OUT/controle-tv-celular.apk" "$OUT/web.zip" "$OUT/update.json" \
   --title "Controle TV $TAG" --notes "${1:-Nova versão}"
 echo "Publicado $TAG"

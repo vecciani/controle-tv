@@ -7,6 +7,8 @@ const store = {
 };
 
 let token = store.get('token');
+const native = window.ControleNative || null;
+const PHONE_APP_URL = 'https://github.com/vecciani/controle-tv/releases/latest/download/controle-tv-celular.apk';
 const state = {
   apps: [], favorites: [], running: [], status: null,
   tab: 'home', appsMode: 'all', editingFavs: false,
@@ -43,6 +45,7 @@ function toast(message, bad = false) {
 function logout() {
   token = null;
   store.remove('token');
+  native?.setToken(null);
   $('app').hidden = true;
   $('pair').hidden = false;
 }
@@ -293,10 +296,26 @@ function tile(app, { edit = false, badge = false } = {}) {
     star.innerHTML = icon('star');
     el.append(star);
   }
-  art.addEventListener('click', () => launch(app));
-  // Long press opens the actions sheet (Android Chrome fires contextmenu on long press)
-  art.addEventListener('contextmenu', (e) => { e.preventDefault(); buzz(25); appSheet(app); });
+  onTapOrHold(art, () => launch(app), () => { buzz(25); appSheet(app); });
   return el;
+}
+
+// Tap runs onTap; holding for half a second runs onHold instead.
+function onTapOrHold(el, onTap, onHold) {
+  let timer = null;
+  let held = false;
+  let start = null;
+  el.addEventListener('pointerdown', (e) => {
+    held = false;
+    start = [e.clientX, e.clientY];
+    timer = setTimeout(() => { held = true; onHold(); }, 500);
+  });
+  el.addEventListener('pointermove', (e) => {
+    if (start && Math.hypot(e.clientX - start[0], e.clientY - start[1]) > 10) clearTimeout(timer);
+  });
+  ['pointerup', 'pointercancel', 'pointerleave'].forEach((t) => el.addEventListener(t, () => clearTimeout(timer)));
+  el.addEventListener('click', (e) => { if (held) { e.preventDefault(); return; } onTap(); });
+  el.addEventListener('contextmenu', (e) => e.preventDefault());
 }
 
 function renderFavs() {
@@ -509,10 +528,16 @@ $('q-power').addEventListener('click', () => {
 });
 
 const ADB_HELP = {
-  off: `<ol>
-      <li>No Fire TV: <b>Configurações → Minha Fire TV → Opções do desenvolvedor</b>.</li>
-      <li>Ative <b>Depuração ADB</b>.</li>
-      <li>Quando aparecer <b>Permitir depuração?</b>, marque <b>Sempre permitir</b> e confirme.</li>
+  off: native
+    ? `<ol>
+      <li>No Fire TV: <b>Configurações → Minha Fire TV → Opções do desenvolvedor → Depuração ADB</b> ligada.</li>
+      <li>Quando aparecer <b>Permitir depuração?</b> na TV, marque <b>Sempre permitir</b> e confirme.</li>
+    </ol>`
+    : `<p class="body">A Amazon bloqueia o controle completo vindo da própria TV. Ele precisa passar pelo <b>app Controle TV do celular</b>:</p>
+    <ol>
+      <li>Toque em <b>Baixar app do celular</b> abaixo e instale (permita instalar desta fonte se o celular pedir).</li>
+      <li>Abra o app: ele acha a TV sozinho.</li>
+      <li>Na TV, aceite <b>Permitir depuração?</b> marcando <b>Sempre permitir</b>.</li>
     </ol>`,
   waiting: `<ol><li>Olhe a TV: a janela <b>Permitir depuração?</b> está aberta.</li>
       <li>Marque <b>Sempre permitir deste computador</b> e confirme.</li></ol>`,
@@ -523,7 +548,7 @@ function settingsSheet() {
   const [dot, text] = STATUS[s.adb] || STATUS.off;
   const sheet = openSheet(`
     <div class="sheet-head"><div><h3>Ajustes</h3><p>Controle TV</p></div></div>
-    <div class="kv"><span>Controle</span><span><span class="dot ${dot}"></span> ${text}</span></div>
+    <div class="kv"><span>Controle</span><span><span class="dot ${dot}"></span> ${text}${s.via ? ` (via ${s.via})` : ''}</span></div>
     ${ADB_HELP[s.adb] ? `<p class="body" style="margin-top:12px">Para liberar o controle completo:</p>${ADB_HELP[s.adb]}` : ''}
     ${s.adbError ? `<div class="kv"><span>Detalhe</span><span class="mono" id="s-adb-error"></span></div>` : ''}
     <div class="kv"><span>Aparelho</span><span id="s-device"></span></div>
@@ -531,6 +556,8 @@ function settingsSheet() {
     <div class="kv"><span>Versão das telas</span><span>${s.webVersion ?? '–'}</span></div>
     <div class="kv"><span>Atualização</span><span id="s-update-text"></span></div>
     <div class="sheet-actions" style="margin-top:16px">
+      ${s.adb !== 'ok' && !native ? `<a class="sheet-btn primary" href="${PHONE_APP_URL}">${icon('download')}Baixar app do celular</a>` : ''}
+      ${native ? `<button class="sheet-btn" id="s-forget">${icon('tv')}Trocar de TV</button>` : ''}
       ${s.adb !== 'ok' ? `<button class="sheet-btn primary" id="s-retry">${icon('refresh')}Tentar conectar de novo</button>
       <button class="sheet-btn" id="s-probe">${icon('search')}Diagnóstico detalhado</button>` : ''}
       ${s.updatePending ? `<button class="sheet-btn primary" id="s-install">${icon('download')}Instalar atualização baixada</button>` : ''}
@@ -549,6 +576,7 @@ function settingsSheet() {
     } catch (e) { toast(e.message, true); }
   });
   sheetButton(sheet, 's-probe', probeSheet);
+  sheetButton(sheet, 's-forget', () => native.forgetTv());
   sheetButton(sheet, 's-install', async () => {
     try {
       await api('/api/update/install', {});
@@ -661,6 +689,7 @@ document.addEventListener('visibilitychange', () => {
 let statusTimer = null;
 
 function start() {
+  native?.setToken(token);
   $('pair').hidden = true;
   $('app').hidden = false;
   greet();
