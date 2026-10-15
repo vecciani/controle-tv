@@ -6,12 +6,13 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
+import org.json.JSONArray
 import java.io.ByteArrayOutputStream
 import java.util.concurrent.ConcurrentHashMap
 
-data class AppInfo(val pkg: String, val label: String)
+data class AppInfo(val pkg: String, val label: String, val system: Boolean)
 
-/** Lists the apps installed on the Fire TV, renders their artwork and opens them. */
+/** Lists the apps installed on the Fire TV, renders their artwork, opens them and keeps favorites. */
 object Apps {
     private val iconCache = ConcurrentHashMap<String, ByteArray>()
 
@@ -23,10 +24,17 @@ object Apps {
             for (info in pm.queryIntentActivities(query, 0)) {
                 val pkg = info.activityInfo.packageName
                 if (pkg == context.packageName || pkg in found) continue
-                found[pkg] = AppInfo(pkg, info.loadLabel(pm).toString())
+                found[pkg] = AppInfo(pkg, info.loadLabel(pm).toString(), Remote.isSystem(context, pkg))
             }
         }
         return found.values.sortedBy { it.label.lowercase() }
+    }
+
+    fun label(context: Context, pkg: String): String = try {
+        val pm = context.packageManager
+        pm.getApplicationInfo(pkg, 0).loadLabel(pm).toString()
+    } catch (e: Exception) {
+        pkg
     }
 
     /** PNG of the app's TV banner, falling back to its regular icon. */
@@ -42,6 +50,10 @@ object Apps {
         out.toByteArray().also { iconCache[pkg] = it }
     }
 
+    fun forget(pkg: String) {
+        iconCache.remove(pkg)
+    }
+
     fun launch(context: Context, pkg: String): Boolean {
         val pm = context.packageManager
         val intent = pm.getLeanbackLaunchIntentForPackage(pkg)
@@ -51,6 +63,19 @@ object Apps {
         context.startActivity(intent)
         return true
     }
+
+    /** Favorites in the order the user arranged them. */
+    fun favorites(context: Context): List<String> {
+        val raw = prefs(context).getString("favorites", "[]")
+        val array = JSONArray(raw)
+        return List(array.length()) { array.getString(it) }
+    }
+
+    fun setFavorites(context: Context, pkgs: List<String>) {
+        prefs(context).edit().putString("favorites", JSONArray(pkgs.distinct()).toString()).apply()
+    }
+
+    private fun prefs(context: Context) = context.getSharedPreferences("apps", Context.MODE_PRIVATE)
 
     private fun toBitmap(drawable: Drawable): Bitmap {
         if (drawable is BitmapDrawable && drawable.bitmap != null) return drawable.bitmap

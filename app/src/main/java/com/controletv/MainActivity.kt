@@ -1,87 +1,62 @@
 package com.controletv
 
+import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.Context
 import android.content.Intent
-import android.graphics.Bitmap
 import android.graphics.Color
-import android.graphics.Typeface
 import android.os.Bundle
-import android.view.Gravity
-import android.widget.ImageView
-import android.widget.LinearLayout
-import android.widget.TextView
-import com.google.zxing.BarcodeFormat
-import com.google.zxing.EncodeHintType
-import com.google.zxing.qrcode.QRCodeWriter
-import java.net.Inet4Address
-import java.net.NetworkInterface
+import android.os.Handler
+import android.os.Looper
+import android.webkit.WebResourceError
+import android.webkit.WebResourceRequest
+import android.webkit.WebView
+import android.webkit.WebViewClient
 
-/** The TV screen: shows the QR code and PIN the phone uses to connect. */
+/**
+ * The TV home screen. It's a web page (tv.html) served by our own server, so it can be
+ * redesigned and updated the same way as the phone page, without reinstalling the app.
+ */
 class MainActivity : Activity() {
+    private lateinit var web: WebView
+    private val handler = Handler(Looper.getMainLooper())
 
+    @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         ControlService.start(this)
+
+        web = WebView(this).apply {
+            setBackgroundColor(Color.parseColor("#07070C"))
+            settings.javaScriptEnabled = true
+            settings.domStorageEnabled = true
+            settings.mediaPlaybackRequiresUserGesture = false
+            webViewClient = object : WebViewClient() {
+                // The server may still be starting when the activity opens: retry until it answers
+                override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
+                    if (request.isForMainFrame) handler.postDelayed({ load() }, 700)
+                }
+            }
+        }
+        setContentView(web)
+        load()
     }
 
-    override fun onResume() {
-        super.onResume()
-        // Rebuilt on every resume because the IP can change after a Wi-Fi reconnect
-        render()
+    private fun load() {
+        val key = Pairing(this).localKey
+        web.loadUrl("http://127.0.0.1:${ControlServer.PORT}/tv.html#k=$key")
     }
 
-    private fun render() {
-        val pin = Pairing(this).pin
-        val ip = localIp()
-        val url = ip?.let { "http://$it:${ControlServer.PORT}" }
-
-        val root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER
-            setBackgroundColor(Color.parseColor("#0F172A"))
-        }
-        root.addView(text("Controle TV", 44f, "#F8FAFC", bold = true))
-
-        if (url == null) {
-            root.addView(text("Sem conexão de rede. Conecte o Fire TV ao Wi-Fi.", 24f, "#FCA5A5"))
-        } else {
-            root.addView(text("Aponte a câmera do celular para o código", 22f, "#94A3B8"))
-            root.addView(ImageView(this).apply {
-                setImageBitmap(qr("$url/?pin=$pin", 440))
-                setPadding(0, 32, 0, 32)
-            })
-            root.addView(text(url, 22f, "#94A3B8"))
-            root.addView(text("PIN  $pin", 36f, "#38BDF8", bold = true))
-        }
-        setContentView(root)
+    @Deprecated("Deprecated in Java")
+    override fun onBackPressed() {
+        // This is the home screen: Back stays here
     }
 
-    private fun text(value: String, size: Float, color: String, bold: Boolean = false) =
-        TextView(this).apply {
-            text = value
-            textSize = size
-            setTextColor(Color.parseColor(color))
-            gravity = Gravity.CENTER
-            if (bold) typeface = Typeface.DEFAULT_BOLD
-            setPadding(0, 8, 0, 8)
-        }
-
-    private fun qr(content: String, size: Int): Bitmap {
-        val matrix = QRCodeWriter().encode(
-            content, BarcodeFormat.QR_CODE, size, size, mapOf(EncodeHintType.MARGIN to 2)
-        )
-        val pixels = IntArray(size * size) { i ->
-            if (matrix[i % size, i / size]) Color.BLACK else Color.WHITE
-        }
-        return Bitmap.createBitmap(pixels, size, size, Bitmap.Config.ARGB_8888)
+    override fun onDestroy() {
+        handler.removeCallbacksAndMessages(null)
+        web.destroy()
+        super.onDestroy()
     }
-
-    private fun localIp(): String? = NetworkInterface.getNetworkInterfaces().toList()
-        .filter { it.isUp && !it.isLoopback }
-        .flatMap { it.inetAddresses.toList() }
-        .firstOrNull { it is Inet4Address && it.isSiteLocalAddress }
-        ?.hostAddress
 
     companion object {
         fun open(context: Context) {

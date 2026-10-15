@@ -25,7 +25,15 @@ class Pairing(context: Context) {
     }
 
     fun isValid(token: String?): Boolean =
-        token != null && token in prefs.getStringSet(KEY_TOKENS, emptySet())!!
+        token != null && (token == localKey || token in prefs.getStringSet(KEY_TOKENS, emptySet())!!)
+
+    /** Secret only the TV's own screen knows, so its page can use TV-only endpoints. */
+    val localKey: String
+        get() = prefs.getString(KEY_LOCAL, null) ?: UUID.randomUUID().toString().also {
+            prefs.edit().putString(KEY_LOCAL, it).apply()
+        }
+
+    fun hasPhones() = prefs.getStringSet(KEY_TOKENS, emptySet())!!.isNotEmpty()
 
     /** Changes the PIN and disconnects every paired phone. */
     fun reset() {
@@ -37,5 +45,6 @@ class Pairing(context: Context) {
     private companion object {
         const val KEY_PIN = "pin"
         const val KEY_TOKENS = "tokens"
+        const val KEY_LOCAL = "local"
     }
 }

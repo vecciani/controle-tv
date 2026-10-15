@@ -3,205 +3,152 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
-<meta name="theme-color" content="#0F172A">
+<meta name="theme-color" content="#07070C">
+<meta name="mobile-web-app-capable" content="yes">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
 <title>Controle TV</title>
-<style>
-  :root {
-    --bg: #0F172A;
-    --surface: #1E293B;
-    --surface-hi: #334155;
-    --text: #F8FAFC;
-    --muted: #94A3B8;
-    --accent: #38BDF8;
-    --danger: #FCA5A5;
-  }
-  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-  html, body { margin: 0; background: var(--bg); color: var(--text);
-    font: 16px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
-  body { min-height: 100dvh; padding: env(safe-area-inset-top) 16px calc(16px + env(safe-area-inset-bottom)); }
-  svg.icon { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 2;
-    stroke-linecap: round; stroke-linejoin: round; flex-shrink: 0; }
-  button { font: inherit; color: inherit; border: 0; background: none; cursor: pointer; }
-
-  header { display: flex; align-items: center; gap: 10px; padding: 16px 0; }
-  header h1 { font-size: 20px; margin: 0; flex: 1; }
-  header .brand { color: var(--accent); display: flex; }
-  .icon-btn { width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center;
-    background: var(--surface); }
-  .icon-btn:active { background: var(--surface-hi); }
-
-  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; }
-  .tile { display: flex; flex-direction: column; gap: 6px; text-align: left; padding: 0; }
-  .tile .art { aspect-ratio: 16 / 9; width: 100%; border-radius: 12px; background: var(--surface);
-    display: grid; place-items: center; overflow: hidden; transition: transform .08s; }
-  .tile .art img { width: 100%; height: 100%; object-fit: contain; }
-  .tile:active .art { transform: scale(.95); outline: 2px solid var(--accent); }
-  .tile .label { font-size: 13px; color: var(--muted); white-space: nowrap; overflow: hidden;
-    text-overflow: ellipsis; }
-
-  .pair { max-width: 360px; margin: 18vh auto 0; text-align: center; }
-  .pair .lock { color: var(--accent); margin-bottom: 8px; }
-  .pair .lock svg { width: 48px; height: 48px; }
-  .pair p { color: var(--muted); }
-  .pair input { width: 100%; font-size: 32px; letter-spacing: 12px; text-align: center; padding: 14px;
-    border-radius: 12px; border: 2px solid var(--surface-hi); background: var(--surface); color: var(--text); }
-  .pair input:focus { outline: none; border-color: var(--accent); }
-  .pair button { margin-top: 12px; width: 100%; padding: 14px; border-radius: 12px; background: var(--accent);
-    color: var(--bg); font-weight: 700; }
-  .error { color: var(--danger); min-height: 1.4em; }
-
-  .empty { color: var(--muted); text-align: center; margin-top: 30vh; }
-  .toast { position: fixed; left: 50%; bottom: calc(24px + env(safe-area-inset-bottom));
-    transform: translate(-50%, 20px); opacity: 0; background: var(--surface-hi); padding: 10px 16px;
-    border-radius: 999px; transition: .2s; pointer-events: none; white-space: nowrap; }
-  .toast.show { opacity: 1; transform: translate(-50%, 0); }
-  [hidden] { display: none !important; }
-</style>
+<link rel="stylesheet" href="base.css">
+<link rel="stylesheet" href="phone.css">
 </head>
 <body>
 
+<!-- Pairing -->
 <section id="pair" class="pair" hidden>
-  <div class="lock">
-    <svg class="icon" viewBox="0 0 24 24"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-  </div>
-  <h2>Conectar à TV</h2>
+  <div class="pair-logo"><i data-icon="tv"></i></div>
+  <h1>Conectar à <span class="neon-text">TV</span></h1>
   <p>Digite o PIN que aparece na tela do Fire TV.</p>
   <form id="pair-form">
-    <input id="pin" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="off" placeholder="0000">
-    <button type="submit">Conectar</button>
+    <input id="pin" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="off" placeholder="····">
+    <button type="submit" class="btn-primary">Conectar</button>
   </form>
   <p class="error" id="pair-error"></p>
 </section>
 
-<main id="main" hidden>
-  <header>
-    <span class="brand">
-      <svg class="icon" viewBox="0 0 24 24"><rect width="20" height="15" x="2" y="7" rx="2" ry="2"/><polyline points="17 2 12 7 7 2"/></svg>
-    </span>
-    <h1>Controle TV</h1>
-    <button class="icon-btn" id="refresh" aria-label="Atualizar">
-      <svg class="icon" viewBox="0 0 24 24"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>
-    </button>
+<!-- App -->
+<div id="app" hidden>
+  <header class="topbar">
+    <div class="brand"><i data-icon="tv"></i><span>CONTROLE<b>TV</b></span></div>
+    <button class="status" id="status-pill"><span class="dot" id="status-dot"></span><span id="status-text">Conectando</span></button>
+    <button class="icon-btn" id="open-settings" aria-label="Ajustes"><i data-icon="settings"></i></button>
   </header>
-  <div class="grid" id="apps"></div>
-  <p class="empty" id="empty" hidden>Carregando apps...</p>
-</main>
+
+  <main>
+    <!-- Início -->
+    <section class="view" id="view-home">
+      <div class="hello">
+        <p class="hello-date" id="hello-date"></p>
+        <h1 id="hello-title">Olá</h1>
+      </div>
+
+      <article class="now" id="now">
+        <div class="now-art" id="now-art"><i data-icon="tv"></i></div>
+        <div class="now-info">
+          <span class="eyebrow">Na tela agora</span>
+          <strong id="now-label">Tela inicial</strong>
+        </div>
+        <div class="now-actions">
+          <button class="round" data-key="playpause" aria-label="Play/Pause"><i data-icon="play"></i></button>
+          <button class="round danger" id="now-close" aria-label="Fechar app" hidden><i data-icon="x"></i></button>
+        </div>
+      </article>
+
+      <div class="quick">
+        <button class="quick-btn cyan" id="q-mirror"><i data-icon="cast"></i><span>Espelhar</span></button>
+        <button class="quick-btn violet" data-tab="keyboard"><i data-icon="keyboard"></i><span>Teclado</span></button>
+        <button class="quick-btn pink" id="q-power"><i data-icon="power"></i><span>Energia</span></button>
+        <button class="quick-btn" data-key="home"><i data-icon="house"></i><span>Início TV</span></button>
+      </div>
+
+      <div class="section-head">
+        <h2>Favoritos</h2>
+        <button class="link" id="edit-favs"><i data-icon="pencil"></i><span>Editar</span></button>
+      </div>
+      <div class="tiles" id="favs"></div>
+      <p class="hint" id="favs-empty" hidden>Toque e segure um app na aba Apps e escolha <b>Fixar no início</b>.</p>
+    </section>
+
+    <!-- Controle -->
+    <section class="view" id="view-remote" hidden>
+      <div class="segmented" id="pad-mode">
+        <button data-mode="touch" class="on"><i data-icon="move"></i>Touchpad</button>
+        <button data-mode="dpad"><i data-icon="gamepad"></i>Setas</button>
+      </div>
+
+      <div class="touchpad" id="touchpad">
+        <span class="touchpad-hint">Deslize para mover · toque para OK</span>
+      </div>
+
+      <div class="dpad" id="dpad" hidden>
+        <button class="dpad-btn up" data-key="up" data-repeat><i data-icon="up"></i></button>
+        <button class="dpad-btn left" data-key="left" data-repeat><i data-icon="left"></i></button>
+        <button class="dpad-ok" data-key="ok">OK</button>
+        <button class="dpad-btn right" data-key="right" data-repeat><i data-icon="right"></i></button>
+        <button class="dpad-btn down" data-key="down" data-repeat><i data-icon="down"></i></button>
+      </div>
+
+      <div class="row3">
+        <button class="pill" data-key="back"><i data-icon="back"></i>Voltar</button>
+        <button class="pill" data-key="home"><i data-icon="house"></i>Início</button>
+        <button class="pill" data-key="menu"><i data-icon="menu"></i>Menu</button>
+      </div>
+
+      <div class="row3">
+        <button class="pill" data-key="rewind" data-repeat><i data-icon="rewind"></i></button>
+        <button class="pill glow" data-key="playpause"><i data-icon="play"></i></button>
+        <button class="pill" data-key="forward" data-repeat><i data-icon="forward"></i></button>
+      </div>
+
+      <div class="volume">
+        <button data-key="voldown" data-repeat aria-label="Diminuir volume"><i data-icon="minus"></i></button>
+        <button data-key="mute" class="vol-mid"><i data-icon="mute"></i><span>Volume</span></button>
+        <button data-key="volup" data-repeat aria-label="Aumentar volume"><i data-icon="plus"></i></button>
+      </div>
+    </section>
+
+    <!-- Apps -->
+    <section class="view" id="view-apps" hidden>
+      <div class="segmented" id="apps-mode">
+        <button data-mode="all" class="on">Todos</button>
+        <button data-mode="running">Abertos <span class="count" id="running-count">0</span></button>
+      </div>
+      <label class="search">
+        <i data-icon="search"></i>
+        <input id="apps-search" type="search" placeholder="Buscar app" autocomplete="off">
+      </label>
+      <div class="tiles" id="apps-all"></div>
+      <div class="list" id="apps-running" hidden></div>
+    </section>
+
+    <!-- Teclado -->
+    <section class="view" id="view-keyboard" hidden>
+      <h2 class="kb-title">Digite <span class="neon-text">direto na TV</span></h2>
+      <p class="hint">Abra um campo de busca na TV e escreva aqui. Cada letra aparece na hora.</p>
+      <textarea id="kb-input" rows="3" placeholder="Escreva aqui…" autocomplete="off" autocapitalize="off" spellcheck="false"></textarea>
+      <div class="row3">
+        <button class="pill" id="kb-clear"><i data-icon="erase"></i>Apagar</button>
+        <button class="pill glow" id="kb-enter"><i data-icon="enter"></i>Enter</button>
+        <button class="pill" data-key="back"><i data-icon="back"></i>Voltar</button>
+      </div>
+      <p class="hint small"><i data-icon="info"></i>No YouTube e na Netflix os acentos são removidos, porque esses apps usam teclado próprio.</p>
+    </section>
+  </main>
+
+  <nav class="tabbar">
+    <button data-tab="home" class="on"><i data-icon="house"></i><span>Início</span></button>
+    <button data-tab="remote"><i data-icon="gamepad"></i><span>Controle</span></button>
+    <button data-tab="apps"><i data-icon="grid"></i><span>Apps</span></button>
+    <button data-tab="keyboard"><i data-icon="keyboard"></i><span>Teclado</span></button>
+  </nav>
+</div>
+
+<!-- Bottom sheet (actions, confirmations, settings) -->
+<div class="sheet-backdrop" id="sheet-backdrop" hidden></div>
+<div class="sheet" id="sheet" hidden></div>
 
 <div class="toast" id="toast"></div>
 
-<script>
-const $ = (id) => document.getElementById(id);
-
-const store = {
-  get(key) { try { return localStorage.getItem(key); } catch { return null; } },
-  set(key, value) { try { localStorage.setItem(key, value); } catch {} },
-  remove(key) { try { localStorage.removeItem(key); } catch {} },
-};
-
-let token = store.get('token');
-
-async function api(path, body) {
-  const res = await fetch(path, {
-    method: body ? 'POST' : 'GET',
-    headers: { 'Content-Type': 'application/json', 'X-Token': token || '' },
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  if (res.status === 401) { logout(); throw new Error('Não pareado'); }
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || 'Erro');
-  return data;
-}
-
-function toast(message) {
-  const el = $('toast');
-  el.textContent = message;
-  el.classList.add('show');
-  clearTimeout(toast.timer);
-  toast.timer = setTimeout(() => el.classList.remove('show'), 1600);
-}
-
-function logout() {
-  token = null;
-  store.remove('token');
-  showPair();
-}
-
-function showPair() {
-  $('main').hidden = true;
-  $('pair').hidden = false;
-}
-
-async function pair(pin) {
-  $('pair-error').textContent = '';
-  try {
-    const data = await api('/api/pair', { pin });
-    token = data.token;
-    store.set('token', token);
-    history.replaceState(null, '', '/');
-    showMain();
-  } catch (e) {
-    $('pair-error').textContent = e.message;
-  }
-}
-
-async function showMain() {
-  $('pair').hidden = true;
-  $('main').hidden = false;
-  await loadApps();
-}
-
-async function loadApps() {
-  const grid = $('apps');
-  $('empty').hidden = false;
-  $('empty').textContent = 'Carregando apps...';
-  try {
-    const { apps } = await api('/api/apps');
-    grid.replaceChildren(...apps.map(appTile));
-    $('empty').hidden = apps.length > 0;
-    $('empty').textContent = 'Nenhum app encontrado.';
-  } catch (e) {
-    $('empty').textContent = 'Não foi possível falar com a TV.';
-  }
-}
-
-function appTile(app) {
-  const btn = document.createElement('button');
-  btn.className = 'tile';
-  const art = document.createElement('span');
-  art.className = 'art';
-  const img = document.createElement('img');
-  img.loading = 'lazy';
-  img.alt = '';
-  img.src = `/api/icon?pkg=${encodeURIComponent(app.pkg)}&token=${encodeURIComponent(token)}`;
-  art.append(img);
-  const label = document.createElement('span');
-  label.className = 'label';
-  label.textContent = app.label;
-  btn.append(art, label);
-  btn.addEventListener('click', () => launch(app));
-  return btn;
-}
-
-async function launch(app) {
-  navigator.vibrate?.(15);
-  try {
-    const { ok } = await api('/api/launch', { pkg: app.pkg });
-    toast(ok ? `Abrindo ${app.label}` : `Não deu para abrir ${app.label}`);
-  } catch (e) {
-    toast(e.message);
-  }
-}
-
-$('pair-form').addEventListener('submit', (e) => {
-  e.preventDefault();
-  pair($('pin').value.trim());
-});
-$('refresh').addEventListener('click', loadApps);
-
-const pinFromQr = new URLSearchParams(location.search).get('pin');
-if (pinFromQr) pair(pinFromQr);
-else if (token) showMain();
-else showPair();
-</script>
+<script src="icons.js"></script>
+<script src="phone.js"></script>
 </body>
 </html>

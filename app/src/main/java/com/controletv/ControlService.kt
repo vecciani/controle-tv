@@ -31,6 +31,9 @@ class ControlService : Service() {
         server = ControlServer(this, Pairing(this)).also {
             it.start(NanoHTTPD.SOCKET_READ_TIMEOUT, false)
         }
+        // Generating the ADB key takes a moment the first time: keep it off the main thread
+        Thread { Adb.init(this) }.start()
+        Updater.startPeriodicChecks(this)
         registerReceiver(screenOn, IntentFilter(Intent.ACTION_SCREEN_ON))
     }
 

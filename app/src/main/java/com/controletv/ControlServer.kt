@@ -6,7 +6,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /**
- * HTTP server the phone talks to. Serves the controller page from assets/web
+ * HTTP server the phone (and the TV's own screen) talks to. Serves the pages
  * and a small JSON API under /api.
  */
 class ControlServer(
@@ -14,53 +14,144 @@ class ControlServer(
     private val pairing: Pairing,
 ) : NanoHTTPD(PORT) {
 
+    @Volatile
+    private var lastPhoneRequest = 0L
+
+    @Volatile
+    private var foregroundCache: Pair<Long, String?> = 0L to null
+
     override fun serve(session: IHTTPSession): Response = try {
         route(session)
+    } catch (e: Adb.Unavailable) {
+        error(Response.Status.CONFLICT, e.message)
+    } catch (e: IllegalArgumentException) {
+        error(Response.Status.BAD_REQUEST, e.message)
     } catch (e: Exception) {
-        json(Response.Status.INTERNAL_ERROR, JSONObject().put("error", e.message))
+        error(Response.Status.INTERNAL_ERROR, e.message ?: e.javaClass.simpleName)
     }
 
     private fun route(session: IHTTPSession): Response {
         val path = session.uri
-        if (!path.startsWith("/api/")) return asset(path)
+        if (!path.startsWith("/api/")) return page(path)
 
         if (path == "/api/pair" && session.method == Method.POST) {
-            val pin = body(session).optString("pin")
-            val token = pairing.pair(pin)
-                ?: return json(Response.Status.FORBIDDEN, JSONObject().put("error", "PIN errado"))
-            return json(Response.Status.OK, JSONObject().put("token", token))
+            val token = pairing.pair(body(session).optString("pin"))
+                ?: return error(Response.Status.FORBIDDEN, "PIN errado")
+            return ok(JSONObject().put("token", token))
         }
 
         // <img> tags can't send headers, so the token may also come in the query string
         val token = session.headers["x-token"] ?: session.parameters["token"]?.firstOrNull()
-        if (!pairing.isValid(token)) {
-            return json(Response.Status.UNAUTHORIZED, JSONObject().put("error", "Não pareado"))
-        }
+        if (!pairing.isValid(token)) return error(Response.Status.UNAUTHORIZED, "Não pareado")
+        val local = token == pairing.localKey
+        if (!local) lastPhoneRequest = System.currentTimeMillis()
 
+        val post = session.method == Method.POST
         return when {
+            path == "/api/status" -> ok(status(local))
+
             path == "/api/apps" -> {
+                val favorites = Apps.favorites(context)
+                val running = if (Adb.state == Adb.State.OK) runCatching { Remote.running(context) }.getOrDefault(emptyList()) else emptyList()
                 val apps = JSONArray()
                 Apps.list(context).forEach {
-                    apps.put(JSONObject().put("pkg", it.pkg).put("label", it.label))
+                    apps.put(
+                        JSONObject().put("pkg", it.pkg).put("label", it.label)
+                            .put("system", it.system).put("favorite", it.pkg in favorites)
+                    )
                 }
-                json(Response.Status.OK, JSONObject().put("apps", apps))
+                ok(
+                    JSONObject().put("apps", apps)
+                        .put("favorites", JSONArray(favorites))
+                        .put("running", JSONArray(running))
+                )
             }
 
             path == "/api/icon" -> {
-                val pkg = session.parameters["pkg"]?.firstOrNull()
-                val png = pkg?.let { Apps.icon(context, it) }
-                    ?: return json(Response.Status.NOT_FOUND, JSONObject())
+                val png = session.parameters["pkg"]?.firstOrNull()?.let { Apps.icon(context, it) }
+                    ?: return error(Response.Status.NOT_FOUND, "Sem ícone")
                 newFixedLengthResponse(Response.Status.OK, "image/png", png.inputStream(), png.size.toLong())
                     .apply { addHeader("Cache-Control", "max-age=86400") }
             }
 
-            path == "/api/launch" && session.method == Method.POST -> {
-                val ok = Apps.launch(context, body(session).optString("pkg"))
-                json(Response.Status.OK, JSONObject().put("ok", ok))
+            path == "/api/launch" && post -> {
+                ok(JSONObject().put("ok", Apps.launch(context, body(session).optString("pkg"))))
             }
 
-            else -> json(Response.Status.NOT_FOUND, JSONObject().put("error", "Rota desconhecida"))
+            path == "/api/key" && post -> {
+                val body = body(session)
+                Remote.key(body.optString("key"), body.optInt("times", 1))
+                ok()
+            }
+
+            path == "/api/text" && post -> {
+                val body = body(session)
+                Remote.type(body.optInt("backspaces"), body.optString("text"), body.optBoolean("enter"))
+                ok()
+            }
+
+            path == "/api/keyboard" && post -> {
+                Remote.useOurKeyboard(context, body(session).optBoolean("active"))
+                ok()
+            }
+
+            path == "/api/stop" && post -> {
+                Remote.stop(body(session).optString("pkg"))
+                ok()
+            }
+
+            path == "/api/uninstall" && post -> {
+                Remote.uninstall(context, body(session).optString("pkg"))
+                ok()
+            }
+
+            path == "/api/favorites" && post -> {
+                val array = body(session).optJSONArray("pkgs") ?: JSONArray()
+                Apps.setFavorites(context, List(array.length()) { array.getString(it) })
+                ok()
+            }
+
+            path == "/api/mirror" && post -> ok(JSONObject().put("opened", Remote.mirror(context)))
+
+            path == "/api/mirror/candidates" -> ok(JSONObject().put("candidates", JSONArray(Remote.mirrorCandidates())))
+
+            path == "/api/update" && post -> ok(JSONObject().put("result", Updater.check(context)))
+
+            path == "/api/qr.png" && local -> {
+                val png = Qr.png("${Net.url()}/?pin=${pairing.pin}", 480)
+                newFixedLengthResponse(Response.Status.OK, "image/png", png.inputStream(), png.size.toLong())
+            }
+
+            else -> error(Response.Status.NOT_FOUND, "Rota desconhecida")
         }
+    }
+
+    private fun status(local: Boolean): JSONObject {
+        val json = JSONObject()
+            .put("adb", Adb.state.name.lowercase())
+            .put("version", BuildConfig.VERSION_CODE)
+            .put("webVersion", WebFiles.version(context))
+            .put("update", Updater.lastResult)
+        foreground()?.let { pkg ->
+            json.put("foreground", JSONObject().put("pkg", pkg).put("label", Apps.label(context, pkg)))
+        }
+        if (local) {
+            json.put("url", Net.url())
+                .put("pin", pairing.pin)
+                .put("paired", pairing.hasPhones())
+                .put("phoneActive", System.currentTimeMillis() - lastPhoneRequest < PHONE_ACTIVE_MS)
+        }
+        return json
+    }
+
+    /** Cached briefly because every open phone asks for it every few seconds. */
+    private fun foreground(): String? {
+        if (Adb.state != Adb.State.OK) return null
+        val (at, pkg) = foregroundCache
+        if (System.currentTimeMillis() - at < 1500) return pkg
+        val fresh = runCatching { Remote.foreground(context) }.getOrNull()
+        foregroundCache = System.currentTimeMillis() to fresh
+        return fresh
     }
 
     private fun body(session: IHTTPSession): JSONObject {
@@ -69,30 +160,36 @@ class ControlServer(
         return files["postData"]?.let { JSONObject(it) } ?: JSONObject()
     }
 
-    private fun asset(path: String): Response {
-        val name = if (path == "/" || path.isEmpty()) "index.html" else path.trimStart('/')
-        if (".." in name) return newFixedLengthResponse(Response.Status.FORBIDDEN, MIME_PLAINTEXT, "")
-        val bytes = try {
-            context.assets.open("web/$name").use { it.readBytes() }
-        } catch (e: Exception) {
-            return newFixedLengthResponse(Response.Status.NOT_FOUND, MIME_PLAINTEXT, "Não encontrado")
+    private fun page(path: String): Response {
+        val name = when (path) {
+            "/", "" -> "index.html"
+            else -> path.trimStart('/')
         }
+        if (".." in name) return error(Response.Status.FORBIDDEN, "")
+        val bytes = WebFiles.read(context, name)
+            ?: return newFixedLengthResponse(Response.Status.NOT_FOUND, MIME_PLAINTEXT, "Não encontrado")
         return newFixedLengthResponse(Response.Status.OK, mimeFor(name), bytes.inputStream(), bytes.size.toLong())
+            .apply { addHeader("Cache-Control", "no-cache") }
     }
 
     private fun mimeFor(name: String) = when (name.substringAfterLast('.')) {
         "html" -> "text/html; charset=utf-8"
-        "js" -> "application/javascript"
-        "css" -> "text/css"
+        "js" -> "application/javascript; charset=utf-8"
+        "css" -> "text/css; charset=utf-8"
+        "json", "webmanifest" -> "application/json; charset=utf-8"
         "svg" -> "image/svg+xml"
         "png" -> "image/png"
         else -> "application/octet-stream"
     }
 
-    private fun json(status: Response.Status, body: JSONObject) =
-        newFixedLengthResponse(status, "application/json; charset=utf-8", body.toString())
+    private fun ok(body: JSONObject = JSONObject().put("ok", true)) =
+        newFixedLengthResponse(Response.Status.OK, "application/json; charset=utf-8", body.toString())
+
+    private fun error(status: Response.Status, message: String?) =
+        newFixedLengthResponse(status, "application/json; charset=utf-8", JSONObject().put("error", message ?: "Erro").toString())
 
     companion object {
         const val PORT = 8765
+        private const val PHONE_ACTIVE_MS = 15_000L
     }
 }

@@ -1,0 +1,64 @@
+/* Shared look for the phone and TV pages: dark with neon. */
+:root {
+  --bg: #07070C;
+  --bg-2: #0D0D17;
+  --surface: #12121D;
+  --surface-2: #1A1A29;
+  --line: rgba(255, 255, 255, .08);
+  --text: #F2F2F7;
+  --muted: #8A8AA3;
+  --cyan: #22D3EE;
+  --violet: #A855F7;
+  --pink: #F472B6;
+  --ok: #34D399;
+  --warn: #FBBF24;
+  --danger: #F87171;
+  --glow-cyan: 0 0 0 1px rgba(34, 211, 238, .55), 0 0 24px rgba(34, 211, 238, .35);
+  --glow-violet: 0 0 0 1px rgba(168, 85, 247, .55), 0 0 24px rgba(168, 85, 247, .35);
+  --neon: linear-gradient(135deg, var(--cyan), var(--violet));
+  --radius: 18px;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+html, body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 16px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  background:
+    radial-gradient(60% 40% at 0% 0%, rgba(34, 211, 238, .12), transparent 70%),
+    radial-gradient(60% 40% at 100% 0%, rgba(168, 85, 247, .14), transparent 70%),
+    var(--bg);
+  background-attachment: fixed;
+}
+
+svg.icon {
+  width: 22px; height: 22px; flex-shrink: 0;
+  fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
+}
+
+button {
+  font: inherit; color: inherit; border: 0; background: none; cursor: pointer; padding: 0;
+  touch-action: manipulation; user-select: none; -webkit-user-select: none;
+}
+
+.neon-text {
+  background: var(--neon);
+  -webkit-background-clip: text; background-clip: text;
+  color: transparent;
+}
+
+.dot {
+  width: 8px; height: 8px; border-radius: 50%; background: var(--muted); display: inline-block; flex-shrink: 0;
+}
+.dot.ok { background: var(--ok); box-shadow: 0 0 10px var(--ok); }
+.dot.warn { background: var(--warn); box-shadow: 0 0 10px var(--warn); }
+.dot.off { background: var(--danger); box-shadow: 0 0 10px var(--danger); }
+
+[hidden] { display: none !important; }
