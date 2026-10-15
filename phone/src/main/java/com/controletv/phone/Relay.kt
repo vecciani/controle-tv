@@ -58,6 +58,13 @@ class Relay(context: Context, private val host: String) {
         }
     }
 
+    /** Installs one APK, or a set of split APKs, on the TV. */
+    @Synchronized
+    fun install(files: List<File>) {
+        val connection = dadb ?: throw IllegalStateException("ADB não conectado")
+        if (files.size == 1) connection.install(files[0], "-r") else connection.installMultiple(files, "-r")
+    }
+
     private fun connectLoop() {
         while (running) {
             if (dadb != null) { Thread.sleep(2_000); continue }

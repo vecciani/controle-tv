@@ -120,6 +120,12 @@ class ControlServer(
 
             path == "/api/mirror/candidates" -> ok(JSONObject().put("candidates", JSONArray(Remote.mirrorCandidates())))
 
+            path == "/api/mirror/try" && post -> {
+                ok(JSONObject().put("output", Remote.tryMirror(context, body(session).optString("component"))))
+            }
+
+            path == "/api/abi" -> ok(JSONObject().put("abis", Adb.shell("getprop ro.product.cpu.abilist").trim()))
+
             path == "/api/update" && post -> ok(JSONObject().put("result", Updater.check(context)))
 
             path == "/api/update/install" && post -> {

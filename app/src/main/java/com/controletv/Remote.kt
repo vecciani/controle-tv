@@ -89,7 +89,7 @@ object Remote {
 
     /**
      * Opens Fire TV's screen mirroring mode. Its activity name changes between Fire OS
-     * versions, so we look for it once and remember what worked.
+     * versions, so we look for it and remember what worked.
      */
     fun mirror(context: Context): String {
         val prefs = context.getSharedPreferences("mirror", Context.MODE_PRIVATE)
@@ -101,15 +101,30 @@ object Remote {
             }
         }
         for (action in listOf("android.settings.CAST_SETTINGS", "android.settings.WIFI_DISPLAY_SETTINGS")) {
-            val out = Adb.shell("am start -a $action")
-            if (!failed(out)) return action
+            if (!failed(Adb.shell("am start -a $action"))) return action
         }
         throw IllegalStateException("Não achei o modo de espelhamento neste Fire TV")
     }
 
+    /** Activities whose names look like mirroring, for the phone's diagnostics screen. */
     fun mirrorCandidates(): List<String> {
-        val out = Adb.shell("dumpsys package | grep -ioE '[a-z0-9_.]+/[a-z0-9_.$]*(mirror|miracast)[a-z0-9_.$]*'")
-        return out.lines().map { it.trim() }.filter { PACKAGE_COMPONENT.matches(it) }.distinct()
+        val out = Adb.shell(
+            "dumpsys package | grep -ioE '[a-z0-9_.]+/[a-z0-9_.$]*(mirror|miracast|wfd|wifidisplay|screencast|cast)[a-z0-9_.$]*'"
+        )
+        return out.lines().map { it.trim() }
+            .filter { PACKAGE_COMPONENT.matches(it) }
+            .filterNot { Regex("(?i)(receiver|service|provider|broadcast)").containsMatchIn(it.substringAfter('/')) }
+            .distinct()
+    }
+
+    /** Tries one candidate and returns what `am start` said, remembering it if it worked. */
+    fun tryMirror(context: Context, component: String): String {
+        if (!PACKAGE_COMPONENT.matches(component)) throw IllegalArgumentException("Componente inválido")
+        val out = Adb.shell("am start -n $component").trim()
+        if (!failed(out)) {
+            context.getSharedPreferences("mirror", Context.MODE_PRIVATE).edit().putString("component", component).apply()
+        }
+        return out
     }
 
     private fun start(component: String): Boolean =

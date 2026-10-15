@@ -500,8 +500,45 @@ $('q-mirror').addEventListener('click', async () => {
   try {
     await api('/api/mirror', {});
     mirrorSheet();
-  } catch (e) { toast(e.message, true); }
+  } catch (e) {
+    mirrorDebugSheet(e.message);
+  }
 });
+
+async function mirrorDebugSheet(reason) {
+  const sheet = openSheet(`
+    <div class="sheet-head"><div><h3>Espelhamento não abriu</h3><p></p></div></div>
+    <p class="body">Estas telas do Fire TV parecem de espelhamento. Teste uma por uma e olhe a TV: a que abrir a tela de espelhamento fica salva no botão.</p>
+    <div class="list" id="s-candidates"><p class="hint">Procurando…</p></div>
+    <pre class="report" id="s-mirror-out" hidden></pre>
+    <p class="body" style="margin-top:14px">Se nenhuma funcionar, ative pela TV: <b>Configurações → Tela e sons → Ativar espelhamento de tela</b>.</p>
+    <div class="sheet-actions"><button class="sheet-btn" id="s-close">${icon('x')}Fechar</button></div>`);
+  sheet.querySelector('.sheet-head p').textContent = reason;
+  sheetButton(sheet, 's-close', closeSheet);
+  const list = sheet.querySelector('#s-candidates');
+  const out = sheet.querySelector('#s-mirror-out');
+  try {
+    const { candidates } = await api('/api/mirror/candidates');
+    if (!candidates.length) { list.innerHTML = '<p class="hint">Nenhuma tela com nome de espelhamento encontrada.</p>'; return; }
+    list.replaceChildren(...candidates.map((component) => {
+      const row = document.createElement('div');
+      row.className = 'candidate';
+      row.innerHTML = '<code></code><button>Testar</button>';
+      row.querySelector('code').textContent = component;
+      row.querySelector('button').onclick = async () => {
+        out.hidden = false;
+        out.textContent = 'Abrindo…';
+        try { out.textContent = (await api('/api/mirror/try', { component })).output || 'Abriu (sem mensagem)'; }
+        catch (err) { out.textContent = err.message; }
+      };
+      return row;
+    }));
+  } catch (err) {
+    list.innerHTML = '';
+    out.hidden = false;
+    out.textContent = err.message;
+  }
+}
 
 function mirrorSheet() {
   const sheet = openSheet(`
@@ -611,6 +648,55 @@ async function probeSheet() {
 $('open-settings').addEventListener('click', settingsSheet);
 $('status-pill').addEventListener('click', settingsSheet);
 
+// ---------- Install on TV (phone app only) ----------
+
+window.onNativeInstall = (status, message) => {
+  toast(message, status === 'error');
+  if (status === 'working') { clearTimeout(toast.timer); }
+  if (status === 'done') { buzz(40); loadApps(); }
+};
+
+$('install-tv').addEventListener('click', async () => {
+  const sheet = openSheet(`
+    <div class="sheet-head"><div><h3>Instalar app na TV</h3><p id="s-abi">Processador da TV: …</p></div></div>
+    <div class="sheet-actions">
+      <button class="sheet-btn primary" id="s-file">${icon('download')}Escolher arquivo APK</button>
+      <button class="sheet-btn" id="s-copy">${icon('phone')}Copiar um app deste celular</button>
+    </div>
+    <p class="hint small" style="margin-top:14px">${icon('info')}Apps de celular funcionam na TV, mas foram feitos para toque. Use o Touchpad para navegar neles.</p>`);
+  sheetButton(sheet, 's-file', () => { closeSheet(); native.pickApk(); });
+  sheetButton(sheet, 's-copy', phoneAppsSheet);
+  try {
+    const { abis } = await api('/api/abi');
+    sheet.querySelector('#s-abi').textContent = `Processador da TV: ${abis}`;
+  } catch { sheet.querySelector('#s-abi').textContent = 'Precisa do controle completo ativo'; }
+});
+
+function phoneAppsSheet() {
+  const apps = JSON.parse(native.phoneApps());
+  const sheet = openSheet(`
+    <div class="sheet-head"><div><h3>Copiar app para a TV</h3><p>${apps.length} apps neste celular</p></div></div>
+    <label class="search">${icon('search')}<input id="s-filter" type="search" placeholder="Buscar" autocomplete="off"></label>
+    <div class="list" id="s-phone-apps"></div>`);
+  const render = () => {
+    const q = sheet.querySelector('#s-filter').value.trim().toLowerCase();
+    sheet.querySelector('#s-phone-apps').replaceChildren(...apps
+      .filter((a) => a.label.toLowerCase().includes(q))
+      .map((a) => {
+        const btn = document.createElement('button');
+        btn.className = 'phone-app';
+        btn.innerHTML = `<img alt=""><span><strong></strong><small></small></span>${icon('download')}`;
+        btn.querySelector('img').src = a.icon;
+        btn.querySelector('strong').textContent = a.label;
+        btn.querySelector('small').textContent = a.split ? `${a.pkg} · em partes` : a.pkg;
+        btn.onclick = () => { closeSheet(); native.sendPhoneApp(a.pkg); };
+        return btn;
+      }));
+  };
+  sheet.querySelector('#s-filter').addEventListener('input', render);
+  render();
+}
+
 // ---------- Keyboard ----------
 // The textarea mirrors the TV field: each change is sent as "delete N, insert text".
 
@@ -704,6 +790,7 @@ function start() {
 }
 
 paintIcons();
+$('install-tv').hidden = !native;
 setPadMode(store.get('padMode') || 'touch');
 
 const pinFromQr = new URLSearchParams(location.search).get('pin');

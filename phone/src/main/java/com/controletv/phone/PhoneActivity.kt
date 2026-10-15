@@ -3,6 +3,15 @@ package com.controletv.phone
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.Context
+import android.content.Intent
+import android.content.pm.ApplicationInfo
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.util.Base64
+import org.json.JSONArray
+import org.json.JSONObject
+import java.io.ByteArrayOutputStream
+import java.io.File
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
@@ -86,6 +95,45 @@ class PhoneActivity : Activity() {
         @JavascriptInterface
         fun relayError(): String = relay?.error ?: ""
 
+        /** Opens the file picker; the result is reported through window.onNativeInstall. */
+        @JavascriptInterface
+        fun pickApk() {
+            main.post {
+                val intent = Intent(Intent.ACTION_OPEN_DOCUMENT)
+                    .addCategory(Intent.CATEGORY_OPENABLE)
+                    .setType("*/*")
+                    .putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("application/vnd.android.package-archive", "application/octet-stream"))
+                startActivityForResult(intent, PICK_APK)
+            }
+        }
+
+        /** Apps the user installed on this phone, as JSON, so they can be copied to the TV. */
+        @JavascriptInterface
+        fun phoneApps(): String {
+            val pm = packageManager
+            val list = JSONArray()
+            pm.getInstalledApplications(0)
+                .filter { it.packageName != packageName && pm.getLaunchIntentForPackage(it.packageName) != null }
+                .filter { it.flags and ApplicationInfo.FLAG_SYSTEM == 0 || it.flags and ApplicationInfo.FLAG_UPDATED_SYSTEM_APP != 0 }
+                .map { it to it.loadLabel(pm).toString() }
+                .sortedBy { it.second.lowercase() }
+                .forEach { (info, label) ->
+                    list.put(
+                        JSONObject().put("pkg", info.packageName).put("label", label)
+                            .put("split", !info.splitSourceDirs.isNullOrEmpty())
+                            .put("icon", iconBase64(info))
+                    )
+                }
+            return list.toString()
+        }
+
+        @JavascriptInterface
+        fun sendPhoneApp(pkg: String) {
+            val info = try { packageManager.getApplicationInfo(pkg, 0) } catch (e: Exception) { return }
+            val files = listOf(File(info.sourceDir)) + info.splitSourceDirs.orEmpty().map { File(it) }
+            installOnTv(files, info.loadLabel(packageManager).toString())
+        }
+
         @JavascriptInterface
         fun forgetTv() {
             main.post {
@@ -93,6 +141,64 @@ class PhoneActivity : Activity() {
                 showDiscovery(null)
             }
         }
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        val uri = data?.data
+        if (requestCode != PICK_APK || resultCode != RESULT_OK || uri == null) return
+        report("working", "Copiando o arquivo…")
+        Thread {
+            try {
+                val apk = File(cacheDir, "send.apk")
+                contentResolver.openInputStream(uri)!!.use { input -> apk.outputStream().use { input.copyTo(it) } }
+                installOnTv(listOf(apk), uri.lastPathSegment?.substringAfterLast('/') ?: "APK")
+            } catch (e: Exception) {
+                report("error", "Não deu para ler o arquivo: ${e.message}")
+            }
+        }.start()
+    }
+
+    private fun installOnTv(files: List<File>, label: String) {
+        val relay = relay
+        if (relay == null || relay.state != Relay.State.OK) {
+            report("error", "O controle completo (ADB) precisa estar ativo")
+            return
+        }
+        report("working", "Instalando $label na TV… pode levar um minuto")
+        Thread {
+            try {
+                relay.install(files)
+                report("done", "$label instalado na TV")
+            } catch (e: Exception) {
+                val reason = e.message.orEmpty()
+                report(
+                    "error",
+                    when {
+                        "NO_MATCHING_ABIS" in reason -> "$label não é compatível com o processador da TV (versão errada: procure a armeabi-v7a ou universal)"
+                        "OLDER_SDK" in reason -> "$label precisa de um Android mais novo que o da TV"
+                        "UPDATE_INCOMPATIBLE" in reason -> "Já existe outra versão de $label na TV com assinatura diferente. Desinstale ela antes"
+                        else -> "Falhou: $reason"
+                    }
+                )
+            }
+        }.start()
+    }
+
+    private fun report(state: String, message: String) = main.post {
+        web?.evaluateJavascript(
+            "window.onNativeInstall && window.onNativeInstall(${JSONObject.quote(state)}, ${JSONObject.quote(message)})", null
+        )
+    }
+
+    private fun iconBase64(info: ApplicationInfo): String {
+        val size = dp(40)
+        val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        info.loadIcon(packageManager).apply { setBounds(0, 0, size, size); draw(Canvas(bitmap)) }
+        val out = ByteArrayOutputStream()
+        bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
+        return "data:image/png;base64," + Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)
     }
 
     // Phone volume buttons control the TV volume while the app is open
@@ -198,7 +304,7 @@ class PhoneActivity : Activity() {
                     conn.connectTimeout = 600
                     conn.readTimeout = 1500
                     val body = conn.inputStream.use { it.readBytes().decodeToString() }
-                    val json = org.json.JSONObject(body)
+                    val json = JSONObject(body)
                     if (json.optString("app") == "controle-tv") results += ip to json.optString("name", "Fire TV")
                 } catch (e: Exception) { /* nothing there */ }
             }
@@ -237,6 +343,7 @@ class PhoneActivity : Activity() {
     }
 
     private companion object {
+        const val PICK_APK = 1
         val BG = Color.parseColor("#07070C")
         val SURFACE = Color.parseColor("#12121D")
         val LINE = Color.parseColor("#2A2A3A")

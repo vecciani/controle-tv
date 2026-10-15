@@ -270,3 +270,19 @@ main { padding: 4px 16px calc(96px + env(safe-area-inset-bottom)); }
   font: 12px/1.5 ui-monospace, Menlo, monospace; color: var(--text); white-space: pre-wrap; word-break: break-word;
   user-select: text; -webkit-user-select: text;
 }
+.install-btn {
+  width: 100%; display: flex; align-items: center; justify-content: center; gap: 10px; padding: 14px; margin-bottom: 12px;
+  border-radius: 16px; background: linear-gradient(135deg, rgba(34, 211, 238, .14), rgba(168, 85, 247, .14));
+  border: 1px solid rgba(34, 211, 238, .4); color: var(--cyan); font-weight: 600;
+}
+.phone-app { display: flex; align-items: center; gap: 12px; width: 100%; padding: 10px 12px; border-radius: 14px;
+  background: var(--surface); border: 1px solid var(--line); text-align: left; }
+.phone-app img { width: 40px; height: 40px; border-radius: 10px; }
+.phone-app span { flex: 1; min-width: 0; }
+.phone-app strong { display: block; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.phone-app small { color: var(--muted); font-size: 12px; }
+.sheet .search { margin-bottom: 10px; }
+.candidate { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 12px;
+  background: var(--surface); border: 1px solid var(--line); }
+.candidate code { flex: 1; min-width: 0; font: 11px/1.4 ui-monospace, Menlo, monospace; word-break: break-all; color: var(--muted); }
+.candidate button { padding: 8px 12px; border-radius: 10px; background: var(--surface-2); color: var(--cyan); font-size: 13px; }
