@@ -116,6 +116,28 @@ class ControlServer(
                 ok()
             }
 
+            path == "/api/play" && post -> {
+                val body = body(session)
+                val url = body.getString("url")
+                if (!url.startsWith("http://") && !url.startsWith("https://")) throw IllegalArgumentException("Só links http(s) podem tocar na TV")
+                val headers = body.optJSONObject("headers")?.let { h -> h.keys().asSequence().associateWith { h.getString(it) } } ?: emptyMap()
+                PlayerActivity.open(
+                    context, url, body.optString("title").ifEmpty { null }, body.optString("type").ifEmpty { null },
+                    body.optString("subtitle").ifEmpty { null }, body.optLong("position"), headers,
+                )
+                ok()
+            }
+
+            path == "/api/open-url" && post -> {
+                val url = body(session).getString("url")
+                if (!url.startsWith("http://") && !url.startsWith("https://")) throw IllegalArgumentException("Link inválido")
+                context.startActivity(
+                    android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))
+                        .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                )
+                ok()
+            }
+
             path == "/api/mirror" && post -> ok(JSONObject().put("opened", Remote.mirror(context)))
 
             path == "/api/mirror/candidates" -> ok(JSONObject().put("candidates", JSONArray(Remote.mirrorCandidates())))

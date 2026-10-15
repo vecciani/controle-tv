@@ -87,6 +87,8 @@ class PhoneActivity : Activity() {
         @JavascriptInterface
         fun setToken(token: String?) {
             relay?.token = token
+            // CastActivity ("Tocar na TV") needs it without the WebView
+            prefs.edit().putString("token", token).apply()
         }
 
         @JavascriptInterface

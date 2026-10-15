@@ -35,6 +35,12 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".PlayerActivity"
+            android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenSize|screenLayout"
+            android:exported="false"
+            android:launchMode="singleTop" />
+
         <service
             android:name=".ControlService"
             android:exported="false" />

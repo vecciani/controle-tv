@@ -791,6 +791,8 @@ function start() {
 
 paintIcons();
 $('install-tv').hidden = !native;
+$('cast-tip').hidden = !native || store.get('castTipClosed') === '1';
+$('cast-tip-close').addEventListener('click', () => { store.set('castTipClosed', '1'); $('cast-tip').hidden = true; });
 setPadMode(store.get('padMode') || 'touch');
 
 const pinFromQr = new URLSearchParams(location.search).get('pin');
