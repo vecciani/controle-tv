@@ -252,9 +252,10 @@ async function refreshStatus() {
     const card = $('connect');
     card.hidden = !s.url;
     card.classList.toggle('big', first);
-    $('connect-title').textContent = first ? 'Aponte a câmera do celular' : 'Conectar outro celular';
+    $('connect-title').textContent = first ? 'Abra o Controle TV no celular' : 'Conectar outro celular';
     $('connect-url').textContent = s.url || '';
-    $('connect-pin').textContent = s.pin;
+    $('connect-pin').textContent = s.requirePin ? s.pin : '';
+    $('connect-pin').hidden = !s.requirePin;
     const qr = `/api/qr.png?token=${encodeURIComponent(key)}&u=${encodeURIComponent(s.url)}`;
     if ($('qr').dataset.src !== qr) { $('qr').src = qr; $('qr').dataset.src = qr; }
   } catch {}

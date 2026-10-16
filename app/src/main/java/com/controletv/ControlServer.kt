@@ -55,6 +55,12 @@ class ControlServer(
         return when {
             path == "/api/status" -> ok(status(local))
 
+            path == "/api/settings" && post -> {
+                val body = body(session)
+                if (body.has("requirePin")) pairing.requirePin = body.getBoolean("requirePin")
+                ok()
+            }
+
             path == "/api/apps" -> {
                 val favorites = Apps.favorites(context)
                 val running = if (Adb.state == Adb.State.OK) runCatching { Remote.running(context) }.getOrDefault(emptyList()) else emptyList()
@@ -194,6 +200,7 @@ class ControlServer(
             .put("updatePending", Updater.pending != null)
             .put("adbError", Adb.lastError)
             .put("lastPlay", PlayerActivity.lastPlay)
+            .put("requirePin", pairing.requirePin)
             .put("device", "${android.os.Build.MODEL} · Android ${android.os.Build.VERSION.RELEASE} (API ${android.os.Build.VERSION.SDK_INT})")
         foreground()?.let { pkg ->
             json.put("foreground", JSONObject().put("pkg", pkg).put("label", Apps.label(context, pkg)))

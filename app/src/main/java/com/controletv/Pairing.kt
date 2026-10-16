@@ -5,8 +5,9 @@ import java.security.SecureRandom
 import java.util.UUID
 
 /**
- * A phone pairs once by sending the PIN shown on the TV and receives a token.
- * Every API call must carry that token, so nobody else on the Wi-Fi can control the TV.
+ * A phone pairs once and receives a token that every API call must carry. When
+ * [requirePin] is on, pairing needs the PIN shown on the TV, so nobody else on a
+ * shared Wi-Fi can take control.
  */
 class Pairing(context: Context) {
     private val prefs = context.getSharedPreferences("pairing", Context.MODE_PRIVATE)
@@ -16,8 +17,13 @@ class Pairing(context: Context) {
             prefs.edit().putString(KEY_PIN, it).apply()
         }
 
+    /** Off by default: on a private network (like the phone's hotspot) any phone connects directly. */
+    var requirePin: Boolean
+        get() = prefs.getBoolean(KEY_REQUIRE_PIN, false)
+        set(value) = prefs.edit().putBoolean(KEY_REQUIRE_PIN, value).apply()
+
     fun pair(candidate: String): String? {
-        if (candidate != pin) return null
+        if (requirePin && candidate != pin) return null
         val token = UUID.randomUUID().toString()
         val tokens = prefs.getStringSet(KEY_TOKENS, emptySet())!! + token
         prefs.edit().putStringSet(KEY_TOKENS, tokens).apply()
@@ -46,5 +52,6 @@ class Pairing(context: Context) {
         const val KEY_PIN = "pin"
         const val KEY_TOKENS = "tokens"
         const val KEY_LOCAL = "local"
+        const val KEY_REQUIRE_PIN = "requirePin"
     }
 }

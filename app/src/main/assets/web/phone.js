@@ -22,7 +22,7 @@ async function api(path, body) {
     headers: { 'Content-Type': 'application/json', 'X-Token': token || '' },
     body: body ? JSON.stringify(body) : undefined,
   });
-  if (res.status === 401) { logout(); throw new Error('Não pareado'); }
+  if (res.status === 401) { token = null; store.remove('token'); connect(); throw new Error('Reconectando…'); }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || 'Erro');
   return data;
@@ -50,16 +50,23 @@ function logout() {
   $('pair').hidden = false;
 }
 
-async function pair(pin) {
+async function pair(pin, { silent = false } = {}) {
   $('pair-error').textContent = '';
   try {
     token = (await api('/api/pair', { pin })).token;
     store.set('token', token);
     history.replaceState(null, '', '/' + location.hash);
     start();
+    return true;
   } catch (e) {
-    $('pair-error').textContent = e.message;
+    if (!silent) $('pair-error').textContent = e.message;
+    return false;
   }
+}
+
+// Connects straight away when the TV doesn't require a PIN
+async function connect() {
+  if (!(await pair('', { silent: true }))) logout();
 }
 
 $('pair-form').addEventListener('submit', (e) => {
@@ -599,6 +606,7 @@ function settingsSheet() {
       ${s.adb !== 'ok' ? `<button class="sheet-btn primary" id="s-retry">${icon('refresh')}Tentar conectar de novo</button>
       <button class="sheet-btn" id="s-probe">${icon('search')}Diagnóstico detalhado</button>` : ''}
       ${s.updatePending ? `<button class="sheet-btn primary" id="s-install">${icon('download')}Instalar atualização baixada</button>` : ''}
+      <button class="sheet-btn" id="s-pin">${icon('lock')}${s.requirePin ? 'Parar de pedir PIN' : 'Pedir PIN para novos celulares'}</button>
       <button class="sheet-btn primary" id="s-update">${icon('download')}Procurar atualização</button>
       <button class="sheet-btn danger" id="s-logout">${icon('logout')}Desconectar este celular</button>
     </div>`);
@@ -616,6 +624,14 @@ function settingsSheet() {
     } catch (e) { toast(e.message, true); }
   });
   sheetButton(sheet, 's-probe', probeSheet);
+  sheetButton(sheet, 's-pin', async () => {
+    try {
+      await api('/api/settings', { requirePin: !s.requirePin });
+      toast(s.requirePin ? 'PIN desligado: celulares conectam direto' : 'Novos celulares vão precisar do PIN da TV');
+      await refreshStatus();
+      settingsSheet();
+    } catch (e) { toast(e.message, true); }
+  });
   sheetButton(sheet, 's-forget', () => native.forgetTv());
   sheetButton(sheet, 's-install', async () => {
     try {
@@ -801,4 +817,4 @@ setPadMode(store.get('padMode') || 'touch');
 const pinFromQr = new URLSearchParams(location.search).get('pin');
 if (pinFromQr) pair(pinFromQr);
 else if (token) start();
-else logout();
+else connect();
