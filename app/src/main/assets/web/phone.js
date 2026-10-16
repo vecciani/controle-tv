@@ -589,6 +589,7 @@ function settingsSheet() {
     ${ADB_HELP[s.adb] ? `<p class="body" style="margin-top:12px">Para liberar o controle completo:</p>${ADB_HELP[s.adb]}` : ''}
     ${s.adbError ? `<div class="kv"><span>Detalhe</span><span class="mono" id="s-adb-error"></span></div>` : ''}
     <div class="kv"><span>Aparelho</span><span id="s-device"></span></div>
+    ${s.lastPlay ? `<div class="kv"><span>Último vídeo</span><span class="mono" id="s-last-play"></span></div>` : ''}
     <div class="kv"><span>Versão do app</span><span>${s.version ?? '–'}</span></div>
     <div class="kv"><span>Versão das telas</span><span>${s.webVersion ?? '–'}</span></div>
     <div class="kv"><span>Atualização</span><span id="s-update-text"></span></div>
@@ -603,6 +604,8 @@ function settingsSheet() {
     </div>`);
   sheet.querySelector('#s-update-text').textContent = s.update || '–';
   sheet.querySelector('#s-device').textContent = s.device || '–';
+  const lastPlay = sheet.querySelector('#s-last-play');
+  if (lastPlay) lastPlay.textContent = s.lastPlay;
   const adbError = sheet.querySelector('#s-adb-error');
   if (adbError) adbError.textContent = s.adbError;
   sheetButton(sheet, 's-retry', async () => {

@@ -193,6 +193,7 @@ class ControlServer(
             .put("update", Updater.lastResult)
             .put("updatePending", Updater.pending != null)
             .put("adbError", Adb.lastError)
+            .put("lastPlay", PlayerActivity.lastPlay)
             .put("device", "${android.os.Build.MODEL} · Android ${android.os.Build.VERSION.RELEASE} (API ${android.os.Build.VERSION.SDK_INT})")
         foreground()?.let { pkg ->
             json.put("foreground", JSONObject().put("pkg", pkg).put("label", Apps.label(context, pkg)))
