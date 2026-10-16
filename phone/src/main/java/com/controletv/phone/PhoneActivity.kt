@@ -23,7 +23,9 @@ import android.view.Gravity
 import android.view.KeyEvent
 import android.view.ViewGroup.LayoutParams.MATCH_PARENT
 import android.view.ViewGroup.LayoutParams.WRAP_CONTENT
+import android.net.Uri
 import android.webkit.ConsoleMessage
+import android.webkit.ValueCallback
 import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceResponse
@@ -51,6 +53,7 @@ class PhoneActivity : Activity() {
     private val main = Handler(Looper.getMainLooper())
     private var web: WebView? = null
     private var relay: Relay? = null
+    private var fileCallback: ValueCallback<Array<Uri>>? = null
 
     private val prefs by lazy { getSharedPreferences("tv", Context.MODE_PRIVATE) }
 
@@ -119,6 +122,21 @@ class PhoneActivity : Activity() {
             }
             // Shows JavaScript errors on screen instead of leaving it blank
             webChromeClient = object : WebChromeClient() {
+                override fun onShowFileChooser(
+                    view: WebView, callback: ValueCallback<Array<Uri>>, params: FileChooserParams,
+                ): Boolean {
+                    fileCallback?.onReceiveValue(null)
+                    fileCallback = callback
+                    val intent = Intent(Intent.ACTION_GET_CONTENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*")
+                    return try {
+                        startActivityForResult(intent, PICK_FILE)
+                        true
+                    } catch (e: Exception) {
+                        fileCallback = null
+                        false
+                    }
+                }
+
                 override fun onConsoleMessage(message: ConsoleMessage): Boolean {
                     if (message.messageLevel() == ConsoleMessage.MessageLevel.ERROR) {
                         jsError.text = "Erro na tela: ${message.message()} (linha ${message.lineNumber()})"
@@ -214,6 +232,11 @@ class PhoneActivity : Activity() {
     @Deprecated("Deprecated in Java")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == PICK_FILE) {
+            fileCallback?.onReceiveValue(data?.data?.takeIf { resultCode == RESULT_OK }?.let { arrayOf(it) })
+            fileCallback = null
+            return
+        }
         val uri = data?.data
         if (requestCode != PICK_APK || resultCode != RESULT_OK || uri == null) return
         report("working", "Copiando o arquivo…")
@@ -405,6 +428,7 @@ class PhoneActivity : Activity() {
 
     private companion object {
         const val PICK_APK = 1
+        const val PICK_FILE = 2
         val BG = Color.parseColor("#07070C")
         val SURFACE = Color.parseColor("#12121D")
         val LINE = Color.parseColor("#2A2A3A")

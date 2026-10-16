@@ -14,13 +14,22 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.TrackSelectionOverride
+import androidx.media3.common.Tracks
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.ui.CaptionStyleCompat
 import androidx.media3.ui.PlayerView
+import org.json.JSONArray
+import org.json.JSONObject
+import java.io.File
+import java.lang.ref.WeakReference
 import java.net.HttpURLConnection
 import java.net.URL
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 /**
  * Full-screen player for video links sent from the phone ("Tocar na TV").
@@ -29,6 +38,9 @@ import java.net.URL
  * and web pages apart, since many links don't say what they are. If our player still
  * can't handle it, the link is handed to another player installed on the TV (VLC, MX…).
  * Media keys from the remote or the phone control it: play/pause, and rewind/forward seek 10 s.
+ *
+ * Subtitles: every one the video app sent is loaded (fixed to UTF-8), Portuguese is turned on
+ * automatically, and the phone can switch tracks or load an .srt while the video plays.
  */
 @OptIn(UnstableApi::class)
 class PlayerActivity : Activity() {
@@ -36,14 +48,34 @@ class PlayerActivity : Activity() {
     private lateinit var view: PlayerView
 
     private class Request(
-        val url: String, val title: String?, val type: String?, val subtitle: String?,
-        val position: Long, val headers: Map<String, String>,
+        val url: String, val title: String?, val type: String?, val subtitles: List<String>,
+        val subtitleNames: List<String>, val position: Long, val headers: Map<String, String>,
     )
+
+    private class Sub(val file: File, val label: String, val language: String?, val manual: Boolean = false)
+
+    // What is playing now, so a subtitle added from the phone can restart it in place
+    private var current: Request? = null
+    private var currentUrl: String? = null
+    private var currentMime: String? = null
+    private val subtitleFiles = mutableListOf<Sub>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        instance = WeakReference(this)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        view = PlayerView(this).apply { keepScreenOn = true }
+        view = PlayerView(this).apply {
+            keepScreenOn = true
+            setShowSubtitleButton(true)
+            // White text with a dark outline and translucent box: readable over any scene
+            subtitleView?.setStyle(
+                CaptionStyleCompat(
+                    0xFFFFFFFF.toInt(), 0x80000000.toInt(), 0x00000000,
+                    CaptionStyleCompat.EDGE_TYPE_OUTLINE, 0xFF000000.toInt(), null,
+                )
+            )
+            subtitleView?.setFractionalTextSize(0.06f)
+        }
         setContentView(view)
         handle(intent)
     }
@@ -61,24 +93,47 @@ class PlayerActivity : Activity() {
         }
         val request = Request(
             url, intent.getStringExtra(EXTRA_TITLE), intent.getStringExtra(EXTRA_TYPE),
-            intent.getStringExtra(EXTRA_SUBTITLE), intent.getLongExtra(EXTRA_POSITION, 0), headers,
+            intent.getStringArrayListExtra(EXTRA_SUBTITLES).orEmpty(),
+            intent.getStringArrayListExtra(EXTRA_SUBTITLE_NAMES).orEmpty(),
+            intent.getLongExtra(EXTRA_POSITION, 0), headers,
         )
         request.title?.let { toast(it) }
         Thread {
+            val subs = loadSubtitles(request)
             val probe = sniff(request)
-            lastPlay = probe.summary
+            lastPlay = probe.summary + if (subs.isNotEmpty()) " · ${subs.size} legenda(s)" else " · sem legenda externa"
             runOnUiThread {
                 if (probe.kind == Kind.PAGE) {
                     toast("O link é uma página da web, não um vídeo. Tentando outro player…")
                     if (!openInOtherPlayer(request)) toast("Nenhum outro player na TV conseguiu abrir")
                 } else {
+                    subtitleFiles.clear()
+                    subtitleFiles += subs
                     start(request, probe.finalUrl, probe.kind.mime ?: mimeFromHints(request))
                 }
             }
         }.start()
     }
 
-    private fun start(request: Request, url: String, mime: String?, retriedAsHls: Boolean = false) {
+    /** Downloads (or reads) every subtitle the video app sent, as clean UTF-8 files. */
+    private fun loadSubtitles(request: Request): List<Sub> =
+        request.subtitles.mapIndexedNotNull { i, sub ->
+            try {
+                val file = if (sub.startsWith("http")) Subtitles.download(this, sub, request.headers) else File(Uri.parse(sub).path!!)
+                val name = request.subtitleNames.getOrNull(i).orEmpty()
+                val language = Subtitles.languageOf("$name $sub")
+                Sub(file, name.ifEmpty { Subtitles.labelFor(language, i) }, language)
+            } catch (e: Exception) {
+                null
+            }
+        }
+
+    private fun start(
+        request: Request, url: String, mime: String?, retriedAsHls: Boolean = false, position: Long = request.position,
+    ) {
+        current = request
+        currentUrl = url
+        currentMime = mime
         val headers = HashMap(request.headers)
         val http = DefaultHttpDataSource.Factory()
             .setAllowCrossProtocolRedirects(true)
@@ -88,18 +143,16 @@ class PlayerActivity : Activity() {
         val item = MediaItem.Builder()
             .setUri(url)
             .apply { mime?.let { setMimeType(it) } }
-            .apply {
-                request.subtitle?.let { sub ->
-                    setSubtitleConfigurations(
-                        listOf(
-                            MediaItem.SubtitleConfiguration.Builder(Uri.parse(sub))
-                                .setMimeType(if (sub.endsWith(".vtt", true)) MimeTypes.TEXT_VTT else MimeTypes.APPLICATION_SUBRIP)
-                                .setSelectionFlags(C.SELECTION_FLAG_DEFAULT)
-                                .build()
-                        )
-                    )
+            .setSubtitleConfigurations(
+                subtitleFiles.map { sub ->
+                    MediaItem.SubtitleConfiguration.Builder(Uri.fromFile(sub.file))
+                        .setMimeType(Subtitles.mimeOf(sub.file))
+                        .setLabel(sub.label)
+                        .setLanguage(sub.language)
+                        .setSelectionFlags(if (sub === defaultSubtitle()) C.SELECTION_FLAG_DEFAULT else 0)
+                        .build()
                 }
-            }
+            )
             .build()
 
         player?.release()
@@ -110,7 +163,14 @@ class PlayerActivity : Activity() {
             .build()
             .also { p ->
                 view.player = p
-                p.setMediaItem(item, request.position)
+                // Subtitles turn on by themselves in the chosen language, including ones inside the stream
+                val language = subtitleLanguage(this)
+                p.trackSelectionParameters = p.trackSelectionParameters.buildUpon()
+                    .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, language == "off")
+                    .setPreferredTextLanguages(*Subtitles.codesFor(language))
+                    .setSelectUndeterminedTextLanguage(true)
+                    .build()
+                p.setMediaItem(item, position)
                 p.addListener(object : Player.Listener {
                     override fun onPlayerError(error: PlaybackException) {
                         lastPlay = "${lastPlay.orEmpty()} | erro do player: ${error.errorCodeName}"
@@ -140,6 +200,7 @@ class PlayerActivity : Activity() {
         view.setClassName(other.activityInfo.packageName, other.activityInfo.name)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         request.title?.let { view.putExtra("title", it) }
+        request.subtitles.firstOrNull { it.startsWith("http") }?.let { view.putExtra("subtitles_location", it) }
         if (request.headers.isNotEmpty()) {
             view.putExtra("headers", request.headers.flatMap { listOf(it.key, it.value) }.toTypedArray())
         }
@@ -214,6 +275,61 @@ class PlayerActivity : Activity() {
         }
     }
 
+    // ---------- Controls from the phone ----------
+
+    private fun textTracks(): List<Pair<Tracks.Group, Int>> {
+        val p = player ?: return emptyList()
+        return p.currentTracks.groups.filter { it.type == C.TRACK_TYPE_TEXT }
+            .flatMap { group -> (0 until group.length).filter { group.isTrackSupported(it) }.map { group to it } }
+    }
+
+    private fun stateJson(): JSONObject {
+        val p = player
+        val tracks = JSONArray()
+        val textOff = p?.trackSelectionParameters?.disabledTrackTypes?.contains(C.TRACK_TYPE_TEXT) == true
+        textTracks().forEachIndexed { i, (group, index) ->
+            val format = group.getTrackFormat(index)
+            tracks.put(
+                JSONObject().put("id", i)
+                    .put("label", format.label ?: format.language?.let { "Legenda ($it)" } ?: "Legenda ${i + 1}")
+                    .put("selected", !textOff && group.isTrackSelected(index))
+            )
+        }
+        return JSONObject()
+            .put("title", current?.title)
+            .put("playing", p?.isPlaying == true)
+            .put("position", p?.currentPosition ?: 0)
+            .put("duration", p?.duration?.takeIf { it > 0 } ?: 0)
+            .put("subtitles", tracks)
+    }
+
+    private fun selectText(id: Int) {
+        val p = player ?: return
+        val builder = p.trackSelectionParameters.buildUpon()
+        if (id < 0) {
+            builder.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+        } else {
+            val (group, index) = textTracks().getOrNull(id) ?: return
+            builder.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+                .setOverrideForType(TrackSelectionOverride(group.mediaTrackGroup, index))
+        }
+        p.trackSelectionParameters = builder.build()
+    }
+
+    /** The external subtitle shown by default: one in the chosen language, else the first one. */
+    private fun defaultSubtitle(): Sub? {
+        val language = subtitleLanguage(this)
+        if (language == "off") return null
+        return subtitleFiles.lastOrNull { it.manual } ?: subtitleFiles.firstOrNull { it.language == language } ?: subtitleFiles.firstOrNull()
+    }
+
+    private fun addSubtitle(file: File, label: String) {
+        val request = current ?: return
+        // A subtitle loaded by hand is the one the user wants: make it the default
+        subtitleFiles += Sub(file, label, Subtitles.languageOf(label), manual = true)
+        start(request, currentUrl ?: request.url, currentMime, retriedAsHls = true, position = player?.currentPosition ?: 0)
+    }
+
     // ---------- Keys ----------
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
@@ -256,7 +372,8 @@ class PlayerActivity : Activity() {
         private const val EXTRA_URL = "url"
         private const val EXTRA_TITLE = "title"
         private const val EXTRA_TYPE = "type"
-        private const val EXTRA_SUBTITLE = "subtitle"
+        private const val EXTRA_SUBTITLES = "subtitles"
+        private const val EXTRA_SUBTITLE_NAMES = "subtitleNames"
         private const val EXTRA_POSITION = "position"
         private const val EXTRA_HEADERS = "headers"
         private const val USER_AGENT = "Mozilla/5.0 (Linux; Android 9) ControleTV"
@@ -283,9 +400,37 @@ class PlayerActivity : Activity() {
             context.getSharedPreferences("player", Context.MODE_PRIVATE).edit().putString("package", pkg).apply()
         }
 
+        private var instance: WeakReference<PlayerActivity>? = null
+
+        /** Runs on the player's thread and waits for the result; null when nothing is playing. */
+        private fun <T> onPlayer(block: PlayerActivity.() -> T): T? {
+            val activity = instance?.get()?.takeIf { !it.isFinishing && !it.isDestroyed } ?: return null
+            var result: T? = null
+            val done = CountDownLatch(1)
+            activity.runOnUiThread {
+                try { result = activity.block() } finally { done.countDown() }
+            }
+            done.await(5, TimeUnit.SECONDS)
+            return result
+        }
+
+        /** "en" (default), "pt", "es" or "off". */
+        fun subtitleLanguage(context: Context): String =
+            context.getSharedPreferences("player", Context.MODE_PRIVATE).getString("subtitleLanguage", "en")!!
+
+        fun setSubtitleLanguage(context: Context, language: String) {
+            context.getSharedPreferences("player", Context.MODE_PRIVATE).edit().putString("subtitleLanguage", language).apply()
+        }
+
+        fun state(): JSONObject? = onPlayer { stateJson() }
+
+        fun selectSubtitle(id: Int) = onPlayer { selectText(id) } != null
+
+        fun addSubtitle(file: File, label: String) = onPlayer { addSubtitle(file, label) } != null
+
         fun open(
             context: Context, url: String, title: String?, type: String?,
-            subtitle: String?, position: Long, headers: Map<String, String>,
+            subtitles: List<String>, subtitleNames: List<String>, position: Long, headers: Map<String, String>,
         ) {
             preferred(context)?.let { pkg ->
                 val other = Intent(Intent.ACTION_VIEW)
@@ -294,6 +439,11 @@ class PlayerActivity : Activity() {
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                     .putExtra("title", title)
                     .putExtra("position", position.toInt())
+                // External players get one subtitle: the chosen language if we can tell, else the first
+                val wanted = subtitleLanguage(context)
+                subtitles.withIndex().filter { it.value.startsWith("http") }
+                    .maxByOrNull { if (Subtitles.languageOf("${subtitleNames.getOrNull(it.index).orEmpty()} ${it.value}") == wanted) 1 else 0 }
+                    ?.let { other.putExtra("subtitles_location", it.value) }
                 if (headers.isNotEmpty()) other.putExtra("headers", headers.flatMap { listOf(it.key, it.value) }.toTypedArray())
                 try {
                     context.startActivity(other)
@@ -311,7 +461,8 @@ class PlayerActivity : Activity() {
                     .putExtra(EXTRA_URL, url)
                     .putExtra(EXTRA_TITLE, title)
                     .putExtra(EXTRA_TYPE, type)
-                    .putExtra(EXTRA_SUBTITLE, subtitle)
+                    .putStringArrayListExtra(EXTRA_SUBTITLES, ArrayList(subtitles))
+                    .putStringArrayListExtra(EXTRA_SUBTITLE_NAMES, ArrayList(subtitleNames))
                     .putExtra(EXTRA_POSITION, position)
                     .putExtra(EXTRA_HEADERS, bundle)
             )

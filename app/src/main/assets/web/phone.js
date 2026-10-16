@@ -697,6 +697,92 @@ async function probeSheet() {
 $('open-settings').addEventListener('click', settingsSheet);
 $('status-pill').addEventListener('click', settingsSheet);
 
+// ---------- Subtitles ----------
+
+const LANGS = [['en', 'Inglês'], ['pt', 'Português'], ['es', 'Espanhol'], ['off', 'Desligada']];
+
+$('subs-btn').addEventListener('click', subtitlesSheet);
+
+async function subtitlesSheet() {
+  const sheet = openSheet(`
+    <div class="sheet-head"><div><h3>Legendas</h3><p id="s-sub-title">Carregando…</p></div></div>
+    <div class="sheet-actions" id="s-tracks"></div>
+    <div class="sheet-actions" style="margin-top:8px">
+      <button class="sheet-btn primary" id="s-sub-file">${icon('download')}Carregar legenda do celular (.srt)</button>
+    </div>
+    <h4>Idioma padrão</h4>
+    <div class="lang-row" id="s-langs"></div>
+    <p class="hint small">${icon('info')}A legenda nesse idioma liga sozinha quando o vídeo tiver uma.</p>`);
+  sheetButton(sheet, 's-sub-file', () => $('sub-file').click());
+
+  const current = state.status?.subtitleLanguage || 'en';
+  sheet.querySelector('#s-langs').replaceChildren(...LANGS.map(([code, label]) => {
+    const btn = document.createElement('button');
+    btn.textContent = label;
+    btn.classList.toggle('on', code === current);
+    btn.onclick = async () => {
+      try {
+        await api('/api/settings', { subtitleLanguage: code });
+        await refreshStatus();
+        toast(`Idioma padrão: ${label}. Vale a partir do próximo vídeo.`);
+        sheet.querySelectorAll('#s-langs button').forEach((b) => b.classList.toggle('on', b === btn));
+      } catch (e) { toast(e.message, true); }
+    };
+    return btn;
+  }));
+
+  const tracksBox = sheet.querySelector('#s-tracks');
+  try {
+    const player = await api('/api/player');
+    if (player.closed) {
+      sheet.querySelector('#s-sub-title').textContent = 'Nenhum vídeo tocando no player do Controle TV';
+      return;
+    }
+    sheet.querySelector('#s-sub-title').textContent = player.title || 'Vídeo na TV';
+    const anyOn = player.subtitles.some((t) => t.selected);
+    const options = [...player.subtitles, { id: -1, label: 'Sem legenda', selected: !anyOn }];
+    if (!player.subtitles.length) {
+      const empty = document.createElement('p');
+      empty.className = 'hint';
+      empty.textContent = 'Este vídeo chegou sem legendas. Carregue um arquivo .srt do celular.';
+      tracksBox.append(empty);
+      return;
+    }
+    tracksBox.replaceChildren(...options.map((t) => {
+      const btn = document.createElement('button');
+      btn.className = 'sheet-btn' + (t.selected ? ' primary' : '');
+      btn.innerHTML = t.selected ? icon('check') : icon(t.id < 0 ? 'x' : 'captions');
+      btn.append(t.label);
+      btn.onclick = async () => {
+        try {
+          await api('/api/player/subtitle', { id: t.id });
+          toast(t.id < 0 ? 'Legenda desligada' : `Legenda: ${t.label}`);
+          subtitlesSheet();
+        } catch (e) { toast(e.message, true); }
+      };
+      return btn;
+    }));
+  } catch (e) {
+    sheet.querySelector('#s-sub-title').textContent = e.message;
+  }
+}
+
+$('sub-file').addEventListener('change', async (e) => {
+  const file = e.target.files?.[0];
+  e.target.value = '';
+  if (!file) return;
+  if (file.size > 5 * 1024 * 1024) { toast('Arquivo grande demais para legenda', true); return; }
+  toast('Enviando legenda…');
+  try {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    let binary = '';
+    for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+    await api('/api/player/subtitle-file', { name: file.name, data: btoa(binary) });
+    toast('Legenda carregada na TV');
+    closeSheet();
+  } catch (err) { toast(err.message, true); }
+});
+
 // ---------- Install on TV (phone app only) ----------
 
 window.onNativeInstall = (status, message) => {

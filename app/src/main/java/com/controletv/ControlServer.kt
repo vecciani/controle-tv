@@ -1,6 +1,8 @@
 package com.controletv
 
 import android.content.Context
+import android.net.Uri
+import android.util.Base64
 import fi.iki.elonen.NanoHTTPD
 import org.json.JSONArray
 import org.json.JSONObject
@@ -59,6 +61,7 @@ class ControlServer(
                 val body = body(session)
                 if (body.has("requirePin")) pairing.requirePin = body.getBoolean("requirePin")
                 if (body.has("player")) PlayerActivity.setPreferred(context, body.optString("player").ifEmpty { null })
+                if (body.has("subtitleLanguage")) PlayerActivity.setSubtitleLanguage(context, body.getString("subtitleLanguage"))
                 ok()
             }
 
@@ -128,10 +131,43 @@ class ControlServer(
                 val url = body.getString("url")
                 if (!url.startsWith("http://") && !url.startsWith("https://")) throw IllegalArgumentException("Só links http(s) podem tocar na TV")
                 val headers = body.optJSONObject("headers")?.let { h -> h.keys().asSequence().associateWith { h.getString(it) } } ?: emptyMap()
+                // Subtitle links, plus subtitle files the phone read from its own storage
+                val subtitles = mutableListOf<String>()
+                val names = mutableListOf<String>()
+                body.optJSONArray("subtitles")?.let { list ->
+                    for (i in 0 until list.length()) {
+                        val sub = list.getJSONObject(i)
+                        val url = sub.optString("url")
+                        val data = sub.optString("data")
+                        val name = sub.optString("name")
+                        when {
+                            data.isNotEmpty() -> subtitles += Uri.fromFile(Subtitles.save(context, name.ifEmpty { "legenda.srt" }, Base64.decode(data, Base64.DEFAULT))).toString()
+                            url.startsWith("http") -> subtitles += url
+                            else -> continue
+                        }
+                        names += name
+                    }
+                }
+                body.optString("subtitle").takeIf { it.startsWith("http") }?.let { subtitles += it; names += "" }
                 PlayerActivity.open(
                     context, url, body.optString("title").ifEmpty { null }, body.optString("type").ifEmpty { null },
-                    body.optString("subtitle").ifEmpty { null }, body.optLong("position"), headers,
+                    subtitles, names, body.optLong("position"), headers,
                 )
+                ok()
+            }
+
+            path == "/api/player" -> ok(PlayerActivity.state() ?: JSONObject().put("closed", true))
+
+            path == "/api/player/subtitle" && post -> {
+                if (!PlayerActivity.selectSubtitle(body(session).getInt("id"))) throw IllegalStateException("Nenhum vídeo tocando")
+                ok()
+            }
+
+            path == "/api/player/subtitle-file" && post -> {
+                val body = body(session)
+                val name = body.optString("name").ifEmpty { "legenda.srt" }
+                val file = Subtitles.save(context, name, Base64.decode(body.getString("data"), Base64.DEFAULT))
+                if (!PlayerActivity.addSubtitle(file, name.substringBeforeLast('.'))) throw IllegalStateException("Nenhum vídeo tocando")
                 ok()
             }
 
@@ -210,6 +246,7 @@ class ControlServer(
             .put("adbError", Adb.lastError)
             .put("lastPlay", PlayerActivity.lastPlay)
             .put("requirePin", pairing.requirePin)
+            .put("subtitleLanguage", PlayerActivity.subtitleLanguage(context))
             .put("device", "${android.os.Build.MODEL} · Android ${android.os.Build.VERSION.RELEASE} (API ${android.os.Build.VERSION.SDK_INT})")
         foreground()?.let { pkg ->
             json.put("foreground", JSONObject().put("pkg", pkg).put("label", Apps.label(context, pkg)))

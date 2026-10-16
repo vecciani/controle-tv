@@ -108,6 +108,8 @@
         <button class="pill" data-key="forward" data-repeat><i data-icon="forward"></i></button>
       </div>
 
+      <button class="pill subs-btn" id="subs-btn"><i data-icon="captions"></i>Legendas</button>
+
       <div class="volume">
         <button data-key="voldown" data-repeat aria-label="Diminuir volume"><i data-icon="minus"></i></button>
         <button data-key="mute" class="vol-mid"><i data-icon="mute"></i><span>Volume</span></button>
@@ -156,6 +158,7 @@
 <div class="sheet-backdrop" id="sheet-backdrop" hidden></div>
 <div class="sheet" id="sheet" hidden></div>
 
+<input type="file" id="sub-file" accept=".srt,.vtt,.ass,.ssa,.sub,text/*" hidden>
 <div class="toast" id="toast"></div>
 
 <script src="icons.js"></script>

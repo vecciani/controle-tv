@@ -5,7 +5,9 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.util.Base64
 import android.widget.Toast
+import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
@@ -58,7 +60,8 @@ class CastActivity : Activity() {
         val body = JSONObject().put("url", url)
         intent.type?.let { body.put("type", it) }
         title(intent)?.let { body.put("title", it) }
-        subtitle(intent)?.let { body.put("subtitle", it) }
+        val subtitles = subtitles(intent)
+        if (subtitles.length() > 0) body.put("subtitles", subtitles)
         val position = intent.getIntExtra("position", 0).toLong()
         if (position > 0) body.put("position", position)
         val headers = headers(intent)
@@ -74,11 +77,35 @@ class CastActivity : Activity() {
             ?: intent.getStringExtra(Intent.EXTRA_TITLE)
             ?: intent.getStringExtra("android.intent.extra.TITLE")
 
-    private fun subtitle(intent: Intent): String? {
+    /**
+     * Every subtitle the app passed: MX Player style ("subs" + "subs.name"), VLC style
+     * ("subtitles_location") or a plain "subtitle". Links go as they are; files stored on
+     * the phone are read here and sent along, since the TV can't reach them.
+     */
+    private fun subtitles(intent: Intent): JSONArray {
+        val found = mutableListOf<Pair<Uri, String>>()
         @Suppress("DEPRECATION")
         val subs = intent.getParcelableArrayExtra("subs")
-        val first = (subs?.firstOrNull() as? Uri)?.toString() ?: intent.getStringExtra("subtitle")
-        return first?.takeIf { it.startsWith("http") }
+        val names = intent.getStringArrayExtra("subs.name")
+        subs?.forEachIndexed { i, sub -> (sub as? Uri)?.let { found += it to names?.getOrNull(i).orEmpty() } }
+        for (key in listOf("subtitles_location", "subtitle")) {
+            intent.getStringExtra(key)?.let { found += Uri.parse(it) to "" }
+        }
+
+        val result = JSONArray()
+        for ((uri, name) in found.distinctBy { it.first }) {
+            val label = name.ifEmpty { uri.lastPathSegment?.substringAfterLast('/').orEmpty() }
+            when (uri.scheme) {
+                "http", "https" -> result.put(JSONObject().put("url", uri.toString()).put("name", label))
+                "content", "file" -> runCatching {
+                    val bytes = contentResolver.openInputStream(uri)!!.use { it.readBytes() }
+                    if (bytes.size <= 5 * 1024 * 1024) {
+                        result.put(JSONObject().put("name", label.ifEmpty { "legenda.srt" }).put("data", Base64.encodeToString(bytes, Base64.NO_WRAP)))
+                    }
+                }
+            }
+        }
+        return result
     }
 
     /** MX Player style ("headers" as [key, value, key, value…]) or a Bundle (browser style). */
