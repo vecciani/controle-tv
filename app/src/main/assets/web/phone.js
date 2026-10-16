@@ -606,6 +606,7 @@ function settingsSheet() {
       ${s.adb !== 'ok' ? `<button class="sheet-btn primary" id="s-retry">${icon('refresh')}Tentar conectar de novo</button>
       <button class="sheet-btn" id="s-probe">${icon('search')}Diagnóstico detalhado</button>` : ''}
       ${s.updatePending ? `<button class="sheet-btn primary" id="s-install">${icon('download')}Instalar atualização baixada</button>` : ''}
+      <button class="sheet-btn" id="s-player">${icon('play')}Player da TV</button>
       <button class="sheet-btn" id="s-pin">${icon('lock')}${s.requirePin ? 'Parar de pedir PIN' : 'Pedir PIN para novos celulares'}</button>
       <button class="sheet-btn primary" id="s-update">${icon('download')}Procurar atualização</button>
       <button class="sheet-btn danger" id="s-logout">${icon('logout')}Desconectar este celular</button>
@@ -624,6 +625,7 @@ function settingsSheet() {
     } catch (e) { toast(e.message, true); }
   });
   sheetButton(sheet, 's-probe', probeSheet);
+  sheetButton(sheet, 's-player', playerSheet);
   sheetButton(sheet, 's-pin', async () => {
     try {
       await api('/api/settings', { requirePin: !s.requirePin });
@@ -650,6 +652,34 @@ function settingsSheet() {
   });
   sheetButton(sheet, 's-logout', () => { closeSheet(); logout(); });
 }
+async function playerSheet() {
+  const sheet = openSheet(`
+    <div class="sheet-head"><div><h3>Player da TV</h3><p>Onde os vídeos do "Tocar na TV" abrem</p></div></div>
+    <div class="sheet-actions" id="s-players"><p class="hint">Carregando…</p></div>
+    <p class="hint small" style="margin-top:14px">${icon('info')}O player do Controle TV repassa os dados de acesso do app de filmes e, se falhar, tenta o VLC sozinho. Alguns links só funcionam nele.</p>`);
+  try {
+    const { players, preferred } = await api('/api/players');
+    const options = [{ pkg: '', label: 'Controle TV (com VLC de reserva)' }, ...players];
+    sheet.querySelector('#s-players').replaceChildren(...options.map((p) => {
+      const btn = document.createElement('button');
+      btn.className = 'sheet-btn' + (p.pkg === preferred ? ' primary' : '');
+      btn.innerHTML = p.pkg === preferred ? icon('check') : icon('play');
+      btn.append(p.label);
+      btn.onclick = async () => {
+        try {
+          await api('/api/settings', { player: p.pkg });
+          toast(`Vídeos vão abrir no ${p.label.replace(/ \(.*\)/, '')}`);
+          closeSheet();
+        } catch (e) { toast(e.message, true); }
+      };
+      return btn;
+    }));
+  } catch (e) {
+    sheet.querySelector('#s-players').innerHTML = '';
+    toast(e.message, true);
+  }
+}
+
 async function probeSheet() {
   const sheet = openSheet(`
     <div class="sheet-head"><div><h3>Diagnóstico do ADB</h3><p>Olhe a TV: se aparecer "Permitir depuração?", aceite</p></div></div>

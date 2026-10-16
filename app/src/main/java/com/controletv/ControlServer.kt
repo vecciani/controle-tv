@@ -58,6 +58,7 @@ class ControlServer(
             path == "/api/settings" && post -> {
                 val body = body(session)
                 if (body.has("requirePin")) pairing.requirePin = body.getBoolean("requirePin")
+                if (body.has("player")) PlayerActivity.setPreferred(context, body.optString("player").ifEmpty { null })
                 ok()
             }
 
@@ -132,6 +133,14 @@ class ControlServer(
                     body.optString("subtitle").ifEmpty { null }, body.optLong("position"), headers,
                 )
                 ok()
+            }
+
+            path == "/api/players" -> {
+                val list = JSONArray()
+                PlayerActivity.installedPlayers(context).forEach { (pkg, label) ->
+                    list.put(JSONObject().put("pkg", pkg).put("label", label))
+                }
+                ok(JSONObject().put("players", list).put("preferred", PlayerActivity.preferred(context) ?: ""))
             }
 
             path == "/api/open-url" && post -> {

@@ -265,10 +265,45 @@ class PlayerActivity : Activity() {
             KeyEvent.KEYCODE_DPAD_RIGHT, KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER,
         )
 
+        /** Video players installed on the TV (other than ours), as package to label. */
+        fun installedPlayers(context: Context): List<Pair<String, String>> {
+            val pm = context.packageManager
+            val probe = Intent(Intent.ACTION_VIEW).setDataAndType(Uri.parse("http://x/v.mp4"), "video/*")
+            return pm.queryIntentActivities(probe, 0)
+                .map { it.activityInfo.packageName to it.loadLabel(pm).toString() }
+                .filter { it.first != context.packageName }
+                .distinctBy { it.first }
+        }
+
+        /** Package of the player chosen in settings, or null for ours. */
+        fun preferred(context: Context): String? =
+            context.getSharedPreferences("player", Context.MODE_PRIVATE).getString("package", null)
+
+        fun setPreferred(context: Context, pkg: String?) {
+            context.getSharedPreferences("player", Context.MODE_PRIVATE).edit().putString("package", pkg).apply()
+        }
+
         fun open(
             context: Context, url: String, title: String?, type: String?,
             subtitle: String?, position: Long, headers: Map<String, String>,
         ) {
+            preferred(context)?.let { pkg ->
+                val other = Intent(Intent.ACTION_VIEW)
+                    .setDataAndType(Uri.parse(url), "video/*")
+                    .setPackage(pkg)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    .putExtra("title", title)
+                    .putExtra("position", position.toInt())
+                if (headers.isNotEmpty()) other.putExtra("headers", headers.flatMap { listOf(it.key, it.value) }.toTypedArray())
+                try {
+                    context.startActivity(other)
+                    lastPlay = "Aberto no player escolhido ($pkg)"
+                    return
+                } catch (e: Exception) {
+                    // Player was uninstalled: fall back to ours
+                    setPreferred(context, null)
+                }
+            }
             val bundle = Bundle().apply { headers.forEach { (k, v) -> putString(k, v) } }
             context.startActivity(
                 Intent(context, PlayerActivity::class.java)
