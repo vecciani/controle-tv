@@ -23,13 +23,17 @@ import android.view.Gravity
 import android.view.KeyEvent
 import android.view.ViewGroup.LayoutParams.MATCH_PARENT
 import android.view.ViewGroup.LayoutParams.WRAP_CONTENT
+import android.webkit.ConsoleMessage
 import android.webkit.JavascriptInterface
+import android.webkit.WebChromeClient
+import android.webkit.WebResourceResponse
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Button
 import android.widget.EditText
+import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import java.net.HttpURLConnection
@@ -64,22 +68,84 @@ class PhoneActivity : Activity() {
     @SuppressLint("SetJavaScriptEnabled")
     private fun showController(host: String) {
         relay?.stop()
-        relay = Relay(this, host).also { it.start() }
+        relay = null
+        web?.destroy()
+        web = null
 
+        val status = text("Conectando à TV…\n$host", 16f, MUTED).apply { gravity = Gravity.CENTER }
+        val jsError = text("", 12f, Color.parseColor("#F87171")).apply {
+            setPadding(dp(16), dp(8), dp(16), dp(16))
+            visibility = android.view.View.GONE
+        }
+        val frame = FrameLayout(this).apply {
+            setBackgroundColor(BG)
+            addView(status, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+        }
+        setContentView(frame)
+
+        // Check the TV answers before loading: an IP that changed would otherwise hang on a black screen
+        Thread {
+            val alive = hello(host) != null
+            main.post {
+                if (isFinishing) return@post
+                if (!alive) showDiscovery("A TV não respondeu em $host. Procurando de novo…", failedHost = host)
+                else loadController(host, frame, status, jsError)
+            }
+        }.start()
+    }
+
+    @SuppressLint("SetJavaScriptEnabled")
+    private fun loadController(host: String, frame: FrameLayout, status: TextView, jsError: TextView) {
+        relay = Relay(this, host).also { it.start() }
+        var finished = false
         val view = WebView(this).apply {
             setBackgroundColor(BG)
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
             addJavascriptInterface(Bridge(), "ControleNative")
             webViewClient = object : WebViewClient() {
+                override fun onPageFinished(view: WebView, url: String) {
+                    finished = true
+                    status.visibility = android.view.View.GONE
+                }
+
                 override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
-                    if (request.isForMainFrame) main.post { showDiscovery("Não achei a TV em $host. Ela está ligada e no mesmo Wi-Fi?") }
+                    if (request.isForMainFrame) main.post { showDiscovery("Erro ao abrir a TV em $host: ${error.description}", failedHost = host) }
+                }
+
+                override fun onReceivedHttpError(view: WebView, request: WebResourceRequest, response: WebResourceResponse) {
+                    if (request.isForMainFrame) main.post { showDiscovery("A TV respondeu com erro ${response.statusCode}. Atualize o app da TV.", failedHost = host) }
+                }
+            }
+            // Shows JavaScript errors on screen instead of leaving it blank
+            webChromeClient = object : WebChromeClient() {
+                override fun onConsoleMessage(message: ConsoleMessage): Boolean {
+                    if (message.messageLevel() == ConsoleMessage.MessageLevel.ERROR) {
+                        jsError.text = "Erro na tela: ${message.message()} (linha ${message.lineNumber()})"
+                        jsError.visibility = android.view.View.VISIBLE
+                    }
+                    return true
                 }
             }
             loadUrl("http://$host:8765/")
         }
         web = view
-        setContentView(view)
+        frame.addView(view, 0, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+        frame.addView(jsError, FrameLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT, Gravity.BOTTOM))
+        main.postDelayed({
+            if (!finished && web === view) showDiscovery("A tela da TV demorou demais para carregar.", failedHost = host)
+        }, 12_000)
+    }
+
+    /** Asks a host whether it's our TV server; returns its name or null. */
+    private fun hello(ip: String): String? = try {
+        val conn = URL("http://$ip:8765/api/hello").openConnection() as HttpURLConnection
+        conn.connectTimeout = 2_500
+        conn.readTimeout = 2_500
+        val json = JSONObject(conn.inputStream.use { it.readBytes().decodeToString() })
+        json.optString("name", "Fire TV").takeIf { json.optString("app") == "controle-tv" }
+    } catch (e: Exception) {
+        null
     }
 
     /** Called from the page's JavaScript. */
@@ -226,7 +292,7 @@ class PhoneActivity : Activity() {
 
     // ---------- Discovery ----------
 
-    private fun showDiscovery(message: String?) {
+    private fun showDiscovery(message: String?, failedHost: String? = null) {
         relay?.stop()
         relay = null
         web?.destroy()
@@ -277,7 +343,7 @@ class PhoneActivity : Activity() {
                             LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { bottomMargin = dp(10) }
                         )
                     }
-                    if (tvs.size == 1 && message == null) choose(tvs[0].first)
+                    if (tvs.size == 1 && tvs[0].first != failedHost) choose(tvs[0].first)
                 }
             }
         }.start()
@@ -301,14 +367,7 @@ class PhoneActivity : Activity() {
         for (prefix in prefixes) for (i in 1..254) {
             val ip = "$prefix.$i"
             pool.execute {
-                try {
-                    val conn = URL("http://$ip:8765/api/hello").openConnection() as HttpURLConnection
-                    conn.connectTimeout = 600
-                    conn.readTimeout = 1500
-                    val body = conn.inputStream.use { it.readBytes().decodeToString() }
-                    val json = JSONObject(body)
-                    if (json.optString("app") == "controle-tv") results += ip to json.optString("name", "Fire TV")
-                } catch (e: Exception) { /* nothing there */ }
+                hello(ip)?.let { results += ip to it }
             }
         }
         pool.shutdown()
