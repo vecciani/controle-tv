@@ -39,4 +39,5 @@ android {
 
 dependencies {
     implementation("dev.mobile:dadb:1.2.10")
+    implementation("com.squareup.okio:okio:2.10.0")
 }

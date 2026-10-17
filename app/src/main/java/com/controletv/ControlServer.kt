@@ -150,7 +150,8 @@ class ControlServer(
             path == "/api/play" && post -> {
                 val body = body(session)
                 val url = body.getString("url")
-                if (!url.startsWith("http://") && !url.startsWith("https://")) throw IllegalArgumentException("Só links http(s) podem tocar na TV")
+                val local = url.startsWith("file:///sdcard/") || url.startsWith("file:///storage/")
+                if (!local && !url.startsWith("http://") && !url.startsWith("https://")) throw IllegalArgumentException("Só links http(s) ou arquivos da TV podem tocar")
                 val headers = body.optJSONObject("headers")?.let { h -> h.keys().asSequence().associateWith { h.getString(it) } } ?: emptyMap()
                 // Subtitle links, plus subtitle files the phone read from its own storage
                 val subtitles = mutableListOf<String>()

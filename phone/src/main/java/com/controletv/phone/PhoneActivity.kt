@@ -54,6 +54,8 @@ class PhoneActivity : Activity() {
     private var web: WebView? = null
     private var relay: Relay? = null
     private var fileCallback: ValueCallback<Array<Uri>>? = null
+    private val tvFiles by lazy { TvFiles(this) { relay } }
+    private var pendingUpload: Pair<String, String>? = null // call id to target folder
 
     private val prefs by lazy { getSharedPreferences("tv", Context.MODE_PRIVATE) }
 
@@ -220,6 +222,38 @@ class PhoneActivity : Activity() {
             installOnTv(files, info.loadLabel(packageManager).toString())
         }
 
+        /**
+         * Async calls from the page (file manager): runs [method] off the UI thread and answers
+         * through window.nativeResult(id, ok, json), with window.nativeProgress for copies.
+         */
+        @JavascriptInterface
+        fun call(id: String, method: String, argsJson: String) {
+            val args = JSONObject(argsJson)
+            if (method == "upload") {
+                pendingUpload = id to args.getString("folder")
+                main.post { startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*"), PICK_UPLOAD) }
+                return
+            }
+            Thread {
+                try {
+                    val result: Any = when (method) {
+                        "list" -> tvFiles.list(args.getString("path"))
+                        "delete" -> tvFiles.delete(args.getString("path"))
+                        "rename" -> tvFiles.rename(args.getString("path"), args.getString("name"))
+                        "mkdir" -> tvFiles.mkdir(args.getString("path"), args.getString("name"))
+                        "install" -> tvFiles.installApk(args.getString("path"))
+                        "open" -> tvFiles.open(args.getString("path"), args.getString("mime"))
+                        "allowRead" -> tvFiles.allowPlayerToRead()
+                        "download" -> tvFiles.download(args.getString("path"), args.optLong("size")) { done, total -> progress(id, done, total) }
+                        else -> throw IllegalArgumentException("Função desconhecida: $method")
+                    }
+                    answer(id, true, if (result is JSONObject) result.toString() else JSONObject.quote(result.toString()))
+                } catch (e: Exception) {
+                    answer(id, false, JSONObject.quote(e.message ?: e.javaClass.simpleName))
+                }
+            }.start()
+        }
+
         @JavascriptInterface
         fun forgetTv() {
             main.post {
@@ -232,6 +266,21 @@ class PhoneActivity : Activity() {
     @Deprecated("Deprecated in Java")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == PICK_UPLOAD) {
+            val (id, folder) = pendingUpload ?: return
+            pendingUpload = null
+            val uri = data?.data
+            if (resultCode != RESULT_OK || uri == null) return answer(id, false, JSONObject.quote("cancelado"))
+            Thread {
+                try {
+                    val name = tvFiles.upload(uri, folder) { done, total -> progress(id, done, total) }
+                    answer(id, true, JSONObject.quote(name))
+                } catch (e: Exception) {
+                    answer(id, false, JSONObject.quote(e.message ?: e.javaClass.simpleName))
+                }
+            }.start()
+            return
+        }
         if (requestCode == PICK_FILE) {
             fileCallback?.onReceiveValue(data?.data?.takeIf { resultCode == RESULT_OK }?.let { arrayOf(it) })
             fileCallback = null
@@ -275,6 +324,14 @@ class PhoneActivity : Activity() {
                 )
             }
         }.start()
+    }
+
+    private fun answer(id: String, ok: Boolean, json: String) {
+        main.post { web?.evaluateJavascript("window.nativeResult && window.nativeResult(${JSONObject.quote(id)}, $ok, $json)", null) }
+    }
+
+    private fun progress(id: String, done: Long, total: Long) {
+        main.post { web?.evaluateJavascript("window.nativeProgress && window.nativeProgress(${JSONObject.quote(id)}, $done, $total)", null) }
     }
 
     private fun report(state: String, message: String) = main.post {
@@ -429,6 +486,7 @@ class PhoneActivity : Activity() {
     private companion object {
         const val PICK_APK = 1
         const val PICK_FILE = 2
+        const val PICK_UPLOAD = 3
         val BG = Color.parseColor("#07070C")
         val SURFACE = Color.parseColor("#12121D")
         val LINE = Color.parseColor("#2A2A3A")

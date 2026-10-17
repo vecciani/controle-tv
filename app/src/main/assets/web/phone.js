@@ -748,6 +748,219 @@ async function probeSheet() {
 $('open-settings').addEventListener('click', settingsSheet);
 $('status-pill').addEventListener('click', settingsSheet);
 
+// ---------- Native calls (phone app only) ----------
+// Long operations (file copies) answer later through window.nativeResult / nativeProgress.
+
+const nativeWaiting = new Map();
+let nativeSeq = 0;
+
+function nativeCall(method, args = {}, onProgress = null) {
+  if (!native) return Promise.reject(new Error('Use o app Controle TV do celular'));
+  const id = `c${++nativeSeq}`;
+  return new Promise((resolve, reject) => {
+    nativeWaiting.set(id, { resolve, reject, onProgress });
+    native.call(id, method, JSON.stringify(args));
+  });
+}
+window.nativeResult = (id, ok, payload) => {
+  const waiting = nativeWaiting.get(id);
+  if (!waiting) return;
+  nativeWaiting.delete(id);
+  ok ? waiting.resolve(payload) : waiting.reject(new Error(payload));
+};
+window.nativeProgress = (id, done, total) => nativeWaiting.get(id)?.onProgress?.(done, total);
+
+// ---------- TV files ----------
+
+const fmtSize = (bytes) => {
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ['KB', 'MB', 'GB', 'TB'];
+  let v = bytes / 1024;
+  let i = 0;
+  while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+  return `${v.toFixed(v < 10 ? 1 : 0).replace('.', ',')} ${units[i]}`;
+};
+const ext = (name) => name.includes('.') ? name.split('.').pop().toLowerCase() : '';
+const VIDEO_EXT = ['mp4', 'mkv', 'avi', 'mov', 'webm', 'm4v', 'ts', 'm3u8', 'mp3', 'm4a', 'aac', 'flac', 'wav', 'ogg'];
+const IMAGE_EXT = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'];
+const MIME = { pdf: 'application/pdf', txt: 'text/plain', srt: 'text/plain', html: 'text/html', zip: 'application/zip' };
+const kindOf = (e) => e.dir ? 'dir' : VIDEO_EXT.includes(ext(e.name)) ? 'video' : ext(e.name) === 'apk' ? 'apk' : IMAGE_EXT.includes(ext(e.name)) ? 'image' : 'file';
+const ICON_OF = { dir: 'folder', video: 'film', apk: 'package', image: 'image', file: 'file' };
+
+let filesPath = '/sdcard';
+let transfer = null; // { label, done, total }
+
+$('q-files').addEventListener('click', () => {
+  if (!native) { toast('O gerenciador de arquivos funciona no app Controle TV do celular', true); return; }
+  filesSheet(filesPath);
+});
+
+async function filesSheet(path) {
+  filesPath = path;
+  const sheet = openSheet(`
+    <div class="sheet-head"><div><h3>Arquivos da TV</h3><p>Armazenamento interno</p></div></div>
+    <p class="files-path" id="f-path"></p>
+    <div class="space-bar"><span id="f-used" style="width:0"></span></div>
+    <p class="space-text" id="f-space">…</p>
+    <div class="transfer" id="f-transfer" hidden><span id="f-transfer-text"></span><div class="space-bar"><span id="f-transfer-bar" style="width:0"></span></div></div>
+    <div class="files-tools">
+      <button id="f-up">${icon('parent')}Voltar pasta</button>
+      <button id="f-mkdir">${icon('folderPlus')}Nova pasta</button>
+      <button id="f-upload">${icon('upload')}Enviar do celular</button>
+    </div>
+    <div class="list" id="f-list"><p class="hint">Carregando…</p></div>`);
+  sheet.querySelector('#f-path').textContent = path;
+  sheet.querySelector('#f-up').disabled = path === '/sdcard';
+  sheet.querySelector('#f-up').onclick = () => filesSheet(path.substring(0, path.lastIndexOf('/')) || '/sdcard');
+  sheet.querySelector('#f-mkdir').onclick = () => nameSheet('Nova pasta', '', async (name) => {
+    await nativeCall('mkdir', { path, name });
+    filesSheet(path);
+  });
+  sheet.querySelector('#f-upload').onclick = () => startTransfer('Enviando', nativeCall('upload', { folder: path }, onTransferProgress), path);
+  renderTransfer();
+
+  try {
+    const data = JSON.parse(await nativeCall('list', { path }));
+    if (filesPath !== path || $('sheet').hidden) return;
+    const { total, free } = data.space || {};
+    if (total) {
+      sheet.querySelector('#f-used').style.width = `${Math.round((total - free) / total * 100)}%`;
+      sheet.querySelector('#f-space').textContent = `${fmtSize(free)} livres de ${fmtSize(total)}`;
+    }
+    const list = sheet.querySelector('#f-list');
+    if (!data.entries.length) { list.innerHTML = '<p class="hint">Pasta vazia.</p>'; return; }
+    list.replaceChildren(...data.entries.map((entry) => {
+      const kind = kindOf(entry);
+      const row = document.createElement('button');
+      row.className = `file-row ${kind}`;
+      row.innerHTML = `${icon(ICON_OF[kind])}<span><strong></strong><small></small></span>`;
+      row.querySelector('strong').textContent = entry.name;
+      const date = new Date(entry.mtime).toLocaleDateString('pt-BR');
+      row.querySelector('small').textContent = entry.dir ? date : `${fmtSize(entry.size)} · ${date}`;
+      const full = `${path}/${entry.name}`;
+      row.onclick = () => entry.dir ? filesSheet(full) : fileActions(entry, full, kind);
+      return row;
+    }));
+  } catch (e) {
+    sheet.querySelector('#f-list').innerHTML = '';
+    toast(e.message, true);
+  }
+}
+
+function fileActions(entry, full, kind) {
+  const sheet = openSheet(`
+    <div class="sheet-head"><div><h3></h3><p>${fmtSize(entry.size)}</p></div></div>
+    <div class="sheet-actions">
+      ${kind === 'video' ? `<button class="sheet-btn primary" id="a-play">${icon('play')}Tocar na TV</button>` : ''}
+      ${kind === 'apk' ? `<button class="sheet-btn primary" id="a-install">${icon('package')}Instalar na TV</button>` : ''}
+      ${kind !== 'video' && kind !== 'apk' ? `<button class="sheet-btn primary" id="a-open">${icon('tv')}Abrir na TV</button>` : ''}
+      <button class="sheet-btn" id="a-download">${icon('download')}Baixar para o celular</button>
+      <button class="sheet-btn" id="a-rename">${icon('pencil')}Renomear</button>
+      <button class="sheet-btn danger" id="a-delete">${icon('trash')}Apagar</button>
+      <button class="sheet-btn" id="a-back">${icon('parent')}Voltar à pasta</button>
+    </div>`);
+  sheet.querySelector('h3').textContent = entry.name;
+  const folder = full.substring(0, full.lastIndexOf('/'));
+  sheetButton(sheet, 'a-back', () => filesSheet(folder));
+  sheetButton(sheet, 'a-play', async () => {
+    try {
+      await nativeCall('allowRead');
+      await api('/api/play', { url: `file://${full}`, title: entry.name });
+      closeSheet();
+      toast('Tocando na TV');
+    } catch (e) { toast(e.message, true); }
+  });
+  sheetButton(sheet, 'a-install', async () => {
+    toast(`Instalando ${entry.name}…`);
+    clearTimeout(toast.timer);
+    try { await nativeCall('install', { path: full }); toast(`${entry.name} instalado`); loadApps(); }
+    catch (e) { toast(e.message, true); }
+  });
+  sheetButton(sheet, 'a-open', async () => {
+    const e2 = ext(entry.name);
+    const mime = MIME[e2] || (IMAGE_EXT.includes(e2) ? 'image/*' : '*/*');
+    try { await nativeCall('open', { path: full, mime }); closeSheet(); }
+    catch (e) { toast(e.message, true); }
+  });
+  sheetButton(sheet, 'a-download', () => {
+    startTransfer('Baixando', nativeCall('download', { path: full, size: entry.size }, onTransferProgress), folder, entry.name, entry.size);
+  });
+  sheetButton(sheet, 'a-rename', () => nameSheet('Renomear', entry.name, async (name) => {
+    await nativeCall('rename', { path: full, name });
+    filesSheet(folder);
+  }));
+  sheetButton(sheet, 'a-delete', () => {
+    const confirm = openSheet(`
+      <div class="sheet-head"><div><h3>Apagar?</h3><p></p></div></div>
+      <p class="body">${entry.dir ? 'A pasta e tudo dentro dela serão apagados.' : 'O arquivo será apagado da TV.'} Não dá para desfazer.</p>
+      <div class="sheet-actions">
+        <button class="sheet-btn danger" id="d-yes">${icon('trash')}Sim, apagar</button>
+        <button class="sheet-btn" id="d-no">${icon('x')}Cancelar</button>
+      </div>`);
+    confirm.querySelector('.sheet-head p').textContent = entry.name;
+    sheetButton(confirm, 'd-no', () => filesSheet(folder));
+    sheetButton(confirm, 'd-yes', async () => {
+      try { await nativeCall('delete', { path: full }); toast('Apagado'); filesSheet(folder); }
+      catch (e) { toast(e.message, true); }
+    });
+  });
+}
+
+function nameSheet(title, value, save) {
+  const sheet = openSheet(`
+    <div class="sheet-head"><div><h3></h3></div></div>
+    <input class="name-input" id="n-name" autocomplete="off">
+    <div class="sheet-actions">
+      <button class="sheet-btn primary" id="n-save">${icon('check')}Salvar</button>
+      <button class="sheet-btn" id="n-cancel">${icon('x')}Cancelar</button>
+    </div>`);
+  sheet.querySelector('h3').textContent = title;
+  const input = sheet.querySelector('#n-name');
+  input.value = value;
+  setTimeout(() => input.focus(), 50);
+  sheetButton(sheet, 'n-cancel', () => filesSheet(filesPath));
+  sheetButton(sheet, 'n-save', async () => {
+    const name = input.value.trim();
+    if (!name) return;
+    try { await save(name); } catch (e) { toast(e.message, true); }
+  });
+}
+
+function onTransferProgress(done, total) {
+  if (!transfer) return;
+  transfer.done = done;
+  if (total > 0) transfer.total = total;
+  renderTransfer();
+}
+
+function renderTransfer() {
+  const box = document.getElementById('f-transfer');
+  if (!box) return;
+  box.hidden = !transfer;
+  if (!transfer) return;
+  const pct = transfer.total ? Math.min(100, Math.round(transfer.done / transfer.total * 100)) : 0;
+  document.getElementById('f-transfer-text').textContent =
+    `${transfer.label}… ${fmtSize(transfer.done)}${transfer.total ? ` de ${fmtSize(transfer.total)} (${pct}%)` : ''}`;
+  document.getElementById('f-transfer-bar').style.width = `${pct}%`;
+}
+
+async function startTransfer(label, promise, folder, name = '', size = 0) {
+  if (transfer) { toast('Espere a cópia atual terminar', true); return; }
+  transfer = { label: name ? `${label} ${name}` : label, done: 0, total: size };
+  if (!document.getElementById('f-transfer')) filesSheet(folder); else renderTransfer();
+  try {
+    const result = await promise;
+    transfer = null;
+    buzz(40);
+    toast(label === 'Baixando' ? `Salvo no celular em ${result}` : `${result} enviado para a TV`);
+    if (!$('sheet').hidden && document.getElementById('f-list')) filesSheet(filesPath);
+  } catch (e) {
+    transfer = null;
+    renderTransfer();
+    if (e.message !== 'cancelado') toast(e.message, true);
+  }
+}
+
 // ---------- Video: seeking and quality ----------
 
 const fmtTime = (ms) => {

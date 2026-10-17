@@ -58,6 +58,15 @@ class Relay(context: Context, private val host: String) {
         }
     }
 
+    /**
+     * A separate ADB connection for big file transfers, so copying a movie doesn't
+     * hold up the remote control. The caller closes it.
+     */
+    fun transferConnection(): Dadb {
+        if (state != State.OK) throw IllegalStateException("O controle completo (ADB) precisa estar ativo")
+        return Dadb.create(host, PORT, keys, 3_000, 60_000)
+    }
+
     /** Installs one APK, or a set of split APKs, on the TV. */
     @Synchronized
     fun install(files: List<File>) {

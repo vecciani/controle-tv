@@ -378,6 +378,11 @@ class PlayerActivity : Activity() {
 
     /** Reads the first bytes of the link (with the same headers the player will send). */
     private fun sniff(request: Request): Probe {
+        if (request.url.startsWith("file:")) {
+            val name = request.url.substringAfterLast('/')
+            val kind = if (name.endsWith(".m3u8", true)) Kind.HLS else Kind.VIDEO
+            return Probe(kind, request.url, "Arquivo da TV: $name")
+        }
         return try {
             var current = URL(request.url)
             var conn: HttpURLConnection

@@ -321,3 +321,24 @@ main { padding: 4px 16px calc(96px + env(safe-area-inset-bottom)); }
 .quality-row { display: flex; flex-wrap: wrap; gap: 6px; }
 .quality-row button { padding: 10px 14px; border-radius: 12px; background: var(--surface); border: 1px solid var(--line); font-size: 14px; color: var(--muted); }
 .quality-row button.on { color: var(--cyan); border-color: rgba(34, 211, 238, .5); background: rgba(34, 211, 238, .08); }
+.files-path { font: 12px/1.4 ui-monospace, Menlo, monospace; color: var(--muted); word-break: break-all; margin: 0 0 8px; }
+.space-bar { height: 6px; border-radius: 3px; background: var(--surface-2); overflow: hidden; margin: 4px 0 4px; }
+.space-bar span { display: block; height: 100%; background: var(--neon); }
+.space-text { font-size: 12px; color: var(--muted); margin-bottom: 12px; }
+.files-tools { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 12px; }
+.files-tools button { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 10px 4px; border-radius: 12px;
+  background: var(--surface); border: 1px solid var(--line); font-size: 12px; }
+.files-tools button:disabled { opacity: .35; }
+.file-row { display: flex; align-items: center; gap: 12px; width: 100%; padding: 10px 12px; border-radius: 12px; background: var(--surface);
+  border: 1px solid var(--line); text-align: left; }
+.file-row svg { color: var(--muted); }
+.file-row.dir svg { color: var(--cyan); }
+.file-row.video svg { color: var(--violet); }
+.file-row.apk svg { color: var(--ok); }
+.file-row span { flex: 1; min-width: 0; }
+.file-row strong { display: block; font-size: 14px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.file-row small { color: var(--muted); font-size: 12px; }
+.transfer { margin-bottom: 12px; padding: 10px 12px; border-radius: 12px; background: rgba(34, 211, 238, .08); border: 1px solid rgba(34, 211, 238, .3); font-size: 13px; }
+.transfer .space-bar { margin-top: 8px; }
+.name-input { width: 100%; padding: 13px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface); color: var(--text); font: inherit; margin-bottom: 12px; }
+.name-input:focus { outline: none; box-shadow: var(--glow-cyan); }
