@@ -182,7 +182,12 @@ pad.addEventListener('pointerdown', (e) => {
     gesture = { x0: e.clientX, y0: e.clientY, t0: Date.now(), moved: false, multi: false, held: false };
     if (padMode === 'air') {
       // Air mode: the pointer follows the phone only while the thumb is down
-      const problem = native?.airMouse(true);
+      let problem;
+      try {
+        problem = native?.airMouse(true);
+      } catch {
+        problem = 'Atualize o app do celular (versão 9 ou mais nova): abra tinyurl.com/2bhywg3r no Chrome';
+      }
       // Older phone apps answered true/false; newer ones return the error text
       if (typeof problem === 'string' && problem) toast(problem, true);
     } else {
@@ -193,7 +198,7 @@ pad.addEventListener('pointerdown', (e) => {
   } else if (gesture) {
     gesture.multi = true;
     clearTimeout(gesture.hold);
-    if (padMode === 'air') native?.airMouse(false);
+    if (padMode === 'air') try { native?.airMouse(false); } catch {}
   }
 });
 
@@ -236,7 +241,7 @@ function endFinger(e) {
   fingers.delete(e.pointerId);
   if (fingers.size || !gesture) return;
   clearTimeout(gesture.hold);
-  if (padMode === 'air') native?.airMouse(false);
+  if (padMode === 'air') try { native?.airMouse(false); } catch {}
   if (!gesture.moved && !gesture.multi && !gesture.held && Date.now() - gesture.t0 < 300) mouseClick(false);
   gesture = null;
 }
@@ -682,6 +687,7 @@ function settingsSheet() {
       <button class="sheet-btn${s.homeLauncher ? ' primary' : ''}" id="s-home">${icon('house')}${s.homeLauncher ? 'Controle TV é a tela inicial (desligar)' : 'Usar o Controle TV como tela inicial'}</button>
       <button class="sheet-btn" id="s-player">${icon('play')}Player da TV</button>
       <button class="sheet-btn" id="s-pin">${icon('lock')}${s.requirePin ? 'Parar de pedir PIN' : 'Pedir PIN para novos celulares'}</button>
+      ${native?.updateTv ? `<button class="sheet-btn primary" id="s-update-tv">${icon('download')}Atualizar a TV pelo celular</button>` : ''}
       <button class="sheet-btn primary" id="s-update">${icon('download')}Procurar atualização</button>
       <button class="sheet-btn danger" id="s-logout">${icon('logout')}Desconectar este celular</button>
     </div>
@@ -706,6 +712,7 @@ function settingsSheet() {
   });
   sheetButton(sheet, 's-probe', probeSheet);
   sheetButton(sheet, 's-player', playerSheet);
+  sheetButton(sheet, 's-update-tv', () => { closeSheet(); native.updateTv(); });
   sheetButton(sheet, 's-home', async () => {
     const enable = !s.homeLauncher;
     toast(enable ? 'Ativando…' : 'Desativando…');
@@ -1421,6 +1428,9 @@ paintIcons();
 $('install-tv').hidden = !native;
 $('cast-tip').hidden = !native || store.get('castTipClosed') === '1';
 $('cast-tip-close').addEventListener('click', () => { store.set('castTipClosed', '1'); $('cast-tip').hidden = true; });
+if (native && !native.version) {
+  setTimeout(() => toast('Há uma versão nova do app do celular: abra tinyurl.com/2bhywg3r no Chrome e instale', true), 1500);
+}
 const hasAir = !!native?.hasGyroscope?.();
 $('mode-air').hidden = !hasAir;
 const savedMode = store.get('padMode');

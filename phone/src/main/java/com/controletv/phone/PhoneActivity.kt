@@ -56,6 +56,24 @@ class PhoneActivity : Activity() {
     private var fileCallback: ValueCallback<Array<Uri>>? = null
     private val tvFiles by lazy { TvFiles(this) { relay } }
     private var airMouse: AirMouse? = null
+    private var lastUpdateCheck = 0L
+    private var lastTvCheck = 0L
+
+    // Once connected, make sure the TV runs the latest version (installed through our ADB)
+    private val tvCheck = object : Runnable {
+        override fun run() {
+            val r = relay
+            val host = prefs.getString("host", null)
+            val token = r?.token
+            if (r != null && host != null && token != null && r.state == Relay.State.OK &&
+                System.currentTimeMillis() - lastTvCheck > 30 * 60 * 1000L
+            ) {
+                lastTvCheck = System.currentTimeMillis()
+                Thread { TvUpdater.updateIfNeeded(this@PhoneActivity, host, token, r)?.let { jsToast(it) } }.start()
+            }
+            main.postDelayed(this, 10_000)
+        }
+    }
     private var pendingUpload: Pair<String, String>? = null // call id to target folder
 
     private val prefs by lazy { getSharedPreferences("tv", Context.MODE_PRIVATE) }
@@ -66,7 +84,18 @@ class PhoneActivity : Activity() {
         window.navigationBarColor = BG
         val host = prefs.getString("host", null)
         if (host == null) showDiscovery(null) else showController(host)
-        Thread { PhoneUpdater.check(this) }.start()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        main.removeCallbacks(tvCheck)
+        main.postDelayed(tvCheck, 5_000)
+        // The app usually stays alive in the background, so check here and not only on launch
+        val now = System.currentTimeMillis()
+        if (now - lastUpdateCheck > 20 * 60 * 1000L) {
+            lastUpdateCheck = now
+            Thread { PhoneUpdater.check(this) }.start()
+        }
     }
 
     // ---------- Controller ----------
@@ -281,6 +310,18 @@ class PhoneActivity : Activity() {
         @JavascriptInterface
         fun version(): Int = BuildConfig.VERSION_CODE
 
+        /** "Atualizar a TV" button: installs the latest TV app through the phone's ADB. */
+        @JavascriptInterface
+        fun updateTv() {
+            val r = relay ?: return jsToast("Ainda conectando à TV")
+            val host = prefs.getString("host", null) ?: return
+            val token = r.token ?: return jsToast("Ainda conectando à TV")
+            jsToast("Verificando a versão da TV…")
+            Thread {
+                jsToast(TvUpdater.updateIfNeeded(this@PhoneActivity, host, token, r, force = false) ?: "A TV já está na versão mais nova")
+            }.start()
+        }
+
         @JavascriptInterface
         fun airMouseSent(): Long = airMouse?.sent ?: 0
 
@@ -360,6 +401,10 @@ class PhoneActivity : Activity() {
         }.start()
     }
 
+    private fun jsToast(message: String) {
+        main.post { web?.evaluateJavascript("window.toast && toast(${JSONObject.quote(message)})", null) }
+    }
+
     private fun answer(id: String, ok: Boolean, json: String) {
         main.post { web?.evaluateJavascript("window.nativeResult && window.nativeResult(${JSONObject.quote(id)}, $ok, $json)", null) }
     }
@@ -400,6 +445,7 @@ class PhoneActivity : Activity() {
 
     override fun onPause() {
         super.onPause()
+        main.removeCallbacks(tvCheck)
         airMouse?.stop()
     }
 
