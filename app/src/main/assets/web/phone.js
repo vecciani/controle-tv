@@ -755,6 +755,7 @@ function settingsSheet() {
       ${s.updatePending ? `<button class="sheet-btn primary" id="s-install">${icon('download')}Instalar atualização baixada</button>` : ''}
       <button class="sheet-btn${s.homeLauncher ? ' primary' : ''}" id="s-home">${icon('house')}${s.homeLauncher ? 'Controle TV é a tela inicial (desligar)' : 'Usar o Controle TV como tela inicial'}</button>
       <button class="sheet-btn" id="s-name">${icon('pencil')}Nome na tela da TV: <span id="s-name-value"></span></button>
+      <button class="sheet-btn" id="s-saver">${icon('image')}Tela de descanso</button>
       <button class="sheet-btn" id="s-player">${icon('play')}Player da TV</button>
       <button class="sheet-btn" id="s-pin">${icon('lock')}${s.requirePin ? 'Parar de pedir PIN' : 'Pedir PIN para novos celulares'}</button>
       ${native?.updateTv ? `<button class="sheet-btn primary" id="s-update-tv">${icon('download')}Atualizar a TV pelo celular</button>` : ''}
@@ -784,6 +785,7 @@ function settingsSheet() {
   });
   sheetButton(sheet, 's-probe', probeSheet);
   sheetButton(sheet, 's-player', playerSheet);
+  sheetButton(sheet, 's-saver', screensaverSheet);
   const nameValue = sheet.querySelector('#s-name-value');
   if (nameValue) nameValue.textContent = s.homeName || '–';
   sheetButton(sheet, 's-name', () => {
@@ -849,6 +851,63 @@ function settingsSheet() {
   });
   sheetButton(sheet, 's-logout', () => { closeSheet(); logout(); });
 }
+// ---------- Screensaver ----------
+
+const SAVER_MINUTES = [1, 2, 5, 10];
+const SAVER_DIM = [[0.15, 'Leve'], [0.35, 'Médio'], [0.55, 'Forte']];
+
+async function screensaverSheet() {
+  await refreshStatus();
+  const saver = state.status?.screensaver || { enabled: true, minutes: 2, dim: 0.35, photos: 0 };
+  const sheet = openSheet(`
+    <div class="sheet-head"><div><h3>Tela de descanso</h3><p>Fotos, relógio e música quando a TV fica parada</p></div></div>
+    <button class="sheet-btn${saver.enabled ? ' primary' : ''}" id="v-toggle">${icon(saver.enabled ? 'check' : 'x')}${saver.enabled ? 'Ligada' : 'Desligada'}</button>
+    <h4>Entrar depois de</h4>
+    <div class="lang-row" id="v-minutes"></div>
+    <h4>Escurecer as fotos</h4>
+    <div class="lang-row" id="v-dim"></div>
+    <h4>Fotos (${saver.photos} na TV)</h4>
+    <div class="sheet-actions">
+      ${native ? `<button class="sheet-btn primary" id="v-upload">${icon('upload')}Enviar fotos do celular</button>` : ''}
+      ${native ? `<button class="sheet-btn" id="v-folder">${icon('folder')}Ver e apagar fotos</button>` : ''}
+      <button class="sheet-btn" id="v-test">${icon('play')}Testar agora</button>
+    </div>
+    <p class="hint small" style="margin-top:12px">${icon('info')}Não entra enquanto um filme ou canal estiver na tela. Qualquer botão do controle sai do descanso.</p>`);
+  const save = async (body, message) => {
+    try { await api('/api/settings', body); toast(message); await refreshStatus(); screensaverSheet(); }
+    catch (e) { toast(e.message, true); }
+  };
+  sheetButton(sheet, 'v-toggle', () => save({ screensaver: !saver.enabled }, saver.enabled ? 'Tela de descanso desligada' : 'Tela de descanso ligada'));
+  sheet.querySelector('#v-minutes').replaceChildren(...SAVER_MINUTES.map((m) => {
+    const b = document.createElement('button');
+    b.textContent = `${m} min`;
+    b.classList.toggle('on', m === saver.minutes);
+    b.onclick = () => save({ screensaverMinutes: m }, `Entra depois de ${m} min parado`);
+    return b;
+  }));
+  sheet.querySelector('#v-dim').replaceChildren(...SAVER_DIM.map(([value, label]) => {
+    const b = document.createElement('button');
+    b.textContent = label;
+    b.classList.toggle('on', Math.abs(value - saver.dim) < 0.05);
+    b.onclick = () => save({ screensaverDim: value }, `Escurecimento: ${label.toLowerCase()}`);
+    return b;
+  }));
+  sheetButton(sheet, 'v-upload', async () => {
+    toast('Escolha as fotos…');
+    try {
+      const count = await nativeCall('uploadPhotos', { folder: saver.folder || '/sdcard/Pictures/DescansoTV' },
+        (done, total) => { toast(`Enviando fotos: ${done + 1} de ${total}`); clearTimeout(toast.timer); });
+      toast(`${count} foto(s) enviada(s) para a TV`);
+      screensaverSheet();
+    } catch (e) { if (e.message !== 'cancelado') toast(e.message, true); }
+  });
+  sheetButton(sheet, 'v-folder', () => filesSheet(saver.folder || '/sdcard/Pictures/DescansoTV'));
+  sheetButton(sheet, 'v-test', async () => {
+    try { await api('/api/screensaver/start', {}); toast('Descanso aberto na TV: qualquer botão sai'); closeSheet(); }
+    catch (e) { toast(e.message, true); }
+  });
+}
+
 async function playerSheet() {
   const sheet = openSheet(`
     <div class="sheet-head"><div><h3>Player da TV</h3><p>Onde os vídeos do "Tocar na TV" abrem</p></div></div>

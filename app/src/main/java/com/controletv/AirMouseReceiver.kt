@@ -50,6 +50,7 @@ class AirMouseReceiver(private val context: Context, private val pairing: Pairin
                         trusted = parts[0]
                     }
                     received++
+                    ScreenSaver.touch()
                     val dx = parts[1].toFloatOrNull() ?: continue
                     val dy = parts[2].toFloatOrNull() ?: continue
                     if (parts.size == 4 && parts[3] == "s") {

@@ -76,6 +76,7 @@ class PhoneActivity : Activity() {
         }
     }
     private var pendingUpload: Pair<String, String>? = null // call id to target folder
+    private var pendingPhotos: Pair<String, String>? = null // call id to screensaver folder
 
     private val prefs by lazy { getSharedPreferences("tv", Context.MODE_PRIVATE) }
 
@@ -267,6 +268,17 @@ class PhoneActivity : Activity() {
         @JavascriptInterface
         fun call(id: String, method: String, argsJson: String) {
             val args = JSONObject(argsJson)
+            if (method == "uploadPhotos") {
+                pendingPhotos = id to args.getString("folder")
+                main.post {
+                    startActivityForResult(
+                        Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("image/*")
+                            .putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true),
+                        PICK_PHOTOS,
+                    )
+                }
+                return
+            }
             if (method == "upload") {
                 pendingUpload = id to args.getString("folder")
                 main.post { startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*"), PICK_UPLOAD) }
@@ -361,6 +373,29 @@ class PhoneActivity : Activity() {
     @Deprecated("Deprecated in Java")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == PICK_PHOTOS) {
+            val (id, folder) = pendingPhotos ?: return
+            pendingPhotos = null
+            val uris = buildList {
+                data?.clipData?.let { clip -> for (i in 0 until clip.itemCount) add(clip.getItemAt(i).uri) }
+                if (isEmpty()) data?.data?.let { add(it) }
+            }
+            if (resultCode != RESULT_OK || uris.isEmpty()) return answer(id, false, JSONObject.quote("cancelado"))
+            Thread {
+                try {
+                    tvFiles.mkdir(folder.substringBeforeLast('/'), folder.substringAfterLast('/'))
+                    // Progress counts photos (each is small): "3 of 12"
+                    uris.forEachIndexed { i, uri ->
+                        progress(id, i.toLong(), uris.size.toLong())
+                        tvFiles.upload(uri, folder) { _, _ -> }
+                    }
+                    answer(id, true, JSONObject.quote("${uris.size}"))
+                } catch (e: Exception) {
+                    answer(id, false, JSONObject.quote(e.message ?: e.javaClass.simpleName))
+                }
+            }.start()
+            return
+        }
         if (requestCode == PICK_UPLOAD) {
             val (id, folder) = pendingUpload ?: return
             pendingUpload = null
@@ -594,6 +629,7 @@ class PhoneActivity : Activity() {
         const val PICK_APK = 1
         const val PICK_FILE = 2
         const val PICK_UPLOAD = 3
+        const val PICK_PHOTOS = 4
         val BG = Color.parseColor("#07070C")
         val SURFACE = Color.parseColor("#12121D")
         val LINE = Color.parseColor("#2A2A3A")

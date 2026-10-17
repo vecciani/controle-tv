@@ -1,4 +1,4 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="home_watcher_description">Abre o Controle TV quando a tela inicial da Amazon aparece, para ele ser a tela inicial da TV.</string>
+    <string name="home_watcher_description">Controle TV: tela inicial e tela de descanso. Percebe quando o controle remoto é usado e qual app está na tela, para abrir a nossa tela inicial e só entrar no descanso quando a TV estiver parada.</string>
 </resources>

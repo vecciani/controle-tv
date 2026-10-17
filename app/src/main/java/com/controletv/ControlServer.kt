@@ -51,13 +51,24 @@ class ControlServer(
         if (!local) lastPhoneRequest = System.currentTimeMillis()
 
         val post = session.method == Method.POST
+        // Commands from the phone count as using the TV (status polling doesn't)
+        if (post) ScreenSaver.touch()
         return when {
             path == "/api/status" -> ok(status(local))
 
             path == "/api/settings" && post -> {
                 val body = body(session)
                 if (body.has("requirePin")) pairing.requirePin = body.getBoolean("requirePin")
-                if (body.has("homeLauncher")) HomeWatcher.setEnabled(body.getBoolean("homeLauncher"))
+                if (body.has("homeLauncher")) HomeWatcher.setRedirectHome(context, body.getBoolean("homeLauncher"))
+                if (body.has("screensaver") || body.has("screensaverMinutes") || body.has("screensaverDim")) {
+                    ScreenSaver.configure(
+                        context,
+                        if (body.has("screensaver")) body.getBoolean("screensaver") else null,
+                        if (body.has("screensaverMinutes")) body.getInt("screensaverMinutes") else null,
+                        if (body.has("screensaverDim")) body.getDouble("screensaverDim").toFloat() else null,
+                    )
+                    if (ScreenSaver.enabled(context)) HomeWatcher.enableForScreensaver(context)
+                }
                 if (body.has("homeName")) HomePrefs.setName(context, body.getString("homeName"))
                 if (body.has("player")) PlayerActivity.setPreferred(context, body.optString("player").ifEmpty { null })
                 if (body.has("subtitleLanguage")) {
@@ -220,6 +231,11 @@ class ControlServer(
                 ok()
             }
 
+            path == "/api/screensaver/start" && post -> {
+                ScreenSaver.start(context)
+                ok()
+            }
+
             path == "/api/media" -> ok(MusicBridge.state(context))
 
             path == "/api/media/art" -> {
@@ -318,7 +334,13 @@ class ControlServer(
             .put("adbError", Adb.lastError)
             .put("lastPlay", PlayerActivity.lastPlay)
             .put("lastFields", PlayerActivity.lastFields)
-            .put("homeLauncher", HomeWatcher.running)
+            .put("homeLauncher", HomeWatcher.running && HomeWatcher.redirectHome(context))
+            .put("screensaver", JSONObject()
+                .put("enabled", ScreenSaver.enabled(context))
+                .put("minutes", ScreenSaver.minutes(context))
+                .put("dim", ScreenSaver.dim(context).toDouble())
+                .put("photos", runCatching { ScreenSaver.photos().size }.getOrDefault(0))
+                .put("folder", ScreenSaver.FOLDER))
             .put("homeName", HomePrefs.name(context))
             .put("airReceived", AirMouseReceiver.received)
             .put("airRejected", AirMouseReceiver.rejected)

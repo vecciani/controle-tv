@@ -37,7 +37,33 @@ class ControlService : Service() {
         // Generating the ADB key takes a moment the first time: keep it off the main thread
         Thread { Adb.init(this) }.start()
         Updater.startPeriodicChecks(this)
+        startScreensaverTimer()
         registerReceiver(screenOn, IntentFilter(Intent.ACTION_SCREEN_ON))
+    }
+
+    /** Checks every 10 s whether the TV has been idle long enough for the screensaver. */
+    private fun startScreensaverTimer() {
+        Thread {
+            var askedService = false
+            var askedPhotos = false
+            while (true) {
+                Thread.sleep(10_000)
+                try {
+                    if (ScreenSaver.enabled(this) && Adb.state == Adb.State.OK) {
+                        // The idle detection needs the accessibility service; photos need storage access
+                        if (!HomeWatcher.running && !askedService) { askedService = true; HomeWatcher.enableForScreensaver(this) }
+                        if (!askedPhotos && checkSelfPermission(android.Manifest.permission.READ_EXTERNAL_STORAGE) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                            askedPhotos = true
+                            Adb.shell("pm grant $packageName android.permission.READ_EXTERNAL_STORAGE")
+                        }
+                    }
+                    // Without the service we can't tell a film from an idle TV: better not start
+                    if (HomeWatcher.running) ScreenSaver.check(this)
+                } catch (e: Exception) {
+                    android.util.Log.w("ScreenSaver", "check failed", e)
+                }
+            }
+        }.apply { name = "screensaver"; isDaemon = true; start() }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int) = START_STICKY
