@@ -1378,6 +1378,70 @@ $('sub-file').addEventListener('change', async (e) => {
   } catch (err) { toast(err.message, true); }
 });
 
+// ---------- Music on the TV ----------
+// What's playing (any app), controls, and search that plays straight away in AuraMusic.
+
+let music = null;
+let musicArtKey = null;
+let seeking = false;
+
+async function refreshMusic() {
+  if (state.tab !== 'home' || document.visibilityState !== 'visible' || !token) return;
+  try { music = await api('/api/media'); } catch { return; }
+  const playingSomething = !!music.title;
+  $('music-app').textContent = playingSomething ? `Tocando na TV · ${music.appLabel}` : 'Música na TV';
+  $('music-title').textContent = playingSomething ? music.title : 'Nada tocando';
+  $('music-artist').textContent = playingSomething ? (music.artist || '') :
+    (!music.enabled ? 'Ative o controle completo para ver o que toca' : music.aura ? 'Pesquise abaixo para tocar no AuraMusic' : 'Instale o AuraMusic na TV para pesquisar');
+  $('music-controls').hidden = !playingSomething;
+  $('music-progress').hidden = !playingSomething || !music.duration;
+  $('music-play').innerHTML = icon(music.playing ? 'pause' : 'play');
+  if (music.artKey !== musicArtKey) {
+    musicArtKey = music.artKey;
+    $('music-art').innerHTML = music.artKey
+      ? `<img src="/api/media/art?token=${encodeURIComponent(token)}&k=${music.artKey}" alt="">`
+      : icon('music');
+  }
+  if (music.duration && !seeking) {
+    $('music-seek').value = Math.round(music.position / music.duration * 1000);
+    $('music-pos').textContent = fmtTime(music.position);
+    $('music-dur').textContent = fmtTime(music.duration);
+  }
+}
+setInterval(refreshMusic, 2000);
+
+document.querySelectorAll('[data-media]').forEach((btn) => btn.addEventListener('click', async () => {
+  buzz(12);
+  try { await api('/api/media/control', { action: btn.dataset.media }); setTimeout(refreshMusic, 400); }
+  catch (e) { toast(e.message, true); }
+}));
+
+$('music-seek').addEventListener('input', () => {
+  seeking = true;
+  if (music?.duration) $('music-pos').textContent = fmtTime($('music-seek').value / 1000 * music.duration);
+});
+$('music-seek').addEventListener('change', async () => {
+  seeking = false;
+  if (!music?.duration) return;
+  try { await api('/api/media/control', { action: 'seek', value: Math.round($('music-seek').value / 1000 * music.duration) }); }
+  catch (e) { toast(e.message, true); }
+  setTimeout(refreshMusic, 400);
+});
+
+async function musicSearch(play) {
+  const query = $('music-query').value.trim();
+  if (!query) { $('music-query').focus(); return; }
+  buzz(15);
+  try {
+    await api('/api/media/search', { query, play });
+    toast(play ? `Tocando "${query}" na TV` : 'Resultados abertos na TV');
+    $('music-query').blur();
+    setTimeout(refreshMusic, 3000);
+  } catch (e) { toast(e.message, true); }
+}
+$('music-search').addEventListener('submit', (e) => { e.preventDefault(); musicSearch(true); });
+$('music-results').addEventListener('click', () => musicSearch(false));
+
 // ---------- TV home layout editor (drag and drop) ----------
 // Sections: the 3 featured slots, each folder row, and the hidden apps. Drag an app by its
 // handle to reorder, move between folders, feature it or hide it. Saves to the TV by itself.
@@ -1712,6 +1776,7 @@ function start() {
   $('app').hidden = false;
   greet();
   refreshStatus();
+  refreshMusic();
   loadApps();
   clearInterval(statusTimer);
   statusTimer = setInterval(() => {

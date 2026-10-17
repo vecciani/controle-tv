@@ -60,6 +60,38 @@
         <button class="quick-btn" id="q-files"><i data-icon="folder"></i><span>Arquivos</span></button>
       </div>
 
+      <article class="music-card" id="music-card">
+        <div class="music-top">
+          <div class="music-art" id="music-art"><i data-icon="music"></i></div>
+          <div class="music-info">
+            <span class="eyebrow" id="music-app">Música na TV</span>
+            <strong id="music-title">Nada tocando</strong>
+            <small id="music-artist">Pesquise abaixo para tocar no AuraMusic</small>
+          </div>
+        </div>
+        <div class="music-progress" id="music-progress" hidden>
+          <input type="range" id="music-seek" min="0" max="1000" value="0">
+          <div class="music-times"><span id="music-pos">0:00</span><span id="music-dur">0:00</span></div>
+        </div>
+        <div class="music-controls" id="music-controls" hidden>
+          <button class="round" data-media="prev" aria-label="Anterior"><i data-icon="skipBack"></i></button>
+          <button class="round glow-btn" data-media="playpause" id="music-play" aria-label="Tocar/Pausar"><i data-icon="play"></i></button>
+          <button class="round" data-media="next" aria-label="Próxima"><i data-icon="skipForward"></i></button>
+          <button class="round" data-key="voldown" data-repeat aria-label="Diminuir volume"><i data-icon="minus"></i></button>
+          <button class="round" data-key="volup" data-repeat aria-label="Aumentar volume"><i data-icon="plus"></i></button>
+        </div>
+        <form class="music-search" id="music-search">
+          <label class="search">
+            <i data-icon="search"></i>
+            <input id="music-query" type="search" placeholder="Tocar no AuraMusic…" autocomplete="off" enterkeyhint="go">
+          </label>
+          <div class="music-search-actions">
+            <button type="submit" class="pill glow"><i data-icon="play"></i>Tocar</button>
+            <button type="button" class="pill" id="music-results"><i data-icon="tv"></i>Ver na TV</button>
+          </div>
+        </form>
+      </article>
+
       <article class="cast-tip" id="cast-tip" hidden>
         <i data-icon="cast"></i>
         <div>

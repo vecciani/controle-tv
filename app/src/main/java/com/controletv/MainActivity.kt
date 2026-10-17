@@ -126,11 +126,13 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        visible = true
         loadApps(force = false)
         handler.post(tick)
     }
 
     override fun onPause() {
+        visible = false
         handler.removeCallbacks(tick)
         super.onPause()
     }
@@ -297,7 +299,7 @@ class MainActivity : Activity() {
                     featuredRow.addView(appCard(app, app.pkg in favorites, Folders.ALL.firstOrNull { it.id == folders[app.pkg] }?.title ?: "Destaque", featuredWidth, "feat:"))
                 }
                 if (favorites.isNotEmpty()) {
-                    rows.addView(row("★  Favoritos", favorites.mapNotNull { byPkg[it] }.map { appCard(it, true) }))
+                    rows.addView(row("Favoritos", favorites.mapNotNull { byPkg[it] }.map { appCard(it, true) }, R.drawable.ic_star))
                 }
                 for (id in rowOrder) {
                     val folder = Folders.ALL.first { it.id == id }
@@ -317,7 +319,7 @@ class MainActivity : Activity() {
         return strip.getChildAt(0)
     }
 
-    private fun row(title: String, cards: List<View>): View {
+    private fun row(title: String, cards: List<View>, icon: Int? = null): View {
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             clipChildren = false
@@ -326,6 +328,11 @@ class MainActivity : Activity() {
         row.addView(text(1.35f, MUTED, bold = true).apply {
             text = title.uppercase()
             letterSpacing = 0.1f
+            icon?.let { res ->
+                val d = getDrawable(res)!!.apply { setBounds(0, 0, u(1.5f), u(1.5f)) }
+                setCompoundDrawables(d, null, null, null)
+                compoundDrawablePadding = u(0.6f)
+            }
         })
         val strip = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -522,7 +529,7 @@ class MainActivity : Activity() {
         val dialog = OptionsDialog("Mover ${app.label} para…")
         val current = Folders.folderOf(this, app.pkg, app.label)
         Folders.ALL.forEach { folder ->
-            dialog.add((if (folder.id == current) "✓  " else "") + folder.title) {
+            dialog.add(folder.title + if (folder.id == current) "   (atual)" else "") {
                 Folders.move(this, app.pkg, folder.id)
                 toast("${app.label} agora está em ${folder.title}")
                 loadApps(force = true)
@@ -602,8 +609,11 @@ class MainActivity : Activity() {
         }
         musicControls.addView(musicPlay)
         musicControls.addView(mediaButton(R.drawable.ic_m_next, false) { MediaListener.current(this)?.transportControls?.skipToNext() })
+        musicControls.addView(mediaButton(R.drawable.ic_m_search, false) {
+            runCatching { MusicBridge.openSearch(this) }.onFailure { toast(it.message ?: "Sem app de música") }
+        })
         info.addView(musicControls)
-        musicAction = pillButton("Abrir música") { openMusicApp() }.apply { visibility = View.GONE }
+        musicAction = pillButton("Abrir AuraMusic") { openMusicApp() }.apply { visibility = View.GONE }
         info.addView(musicAction, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { topMargin = u(0.6f) })
         box.addView(info, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
         return box
@@ -635,7 +645,7 @@ class MainActivity : Activity() {
         val controller = MediaListener.current(this)
         val meta = controller?.metadata
         if (controller == null || meta == null) {
-            showMusic("music:none", "Nada tocando", "Apple Music, Spotify, Amazon Music…", null, false, showAction = true)
+            showMusic("music:none", "Nada tocando", "Pesquise pelo celular ou abra o AuraMusic", null, false, showAction = true)
             return
         }
         val title = meta.getString(MediaMetadata.METADATA_KEY_TITLE) ?: "Música"
@@ -659,7 +669,8 @@ class MainActivity : Activity() {
 
     private fun openMusicApp() {
         val apps = Apps.list(this)
-        val music = apps.firstOrNull { it.pkg == "com.apple.android.music" }
+        val music = apps.firstOrNull { it.pkg == MusicBridge.AURA }
+            ?: apps.firstOrNull { it.pkg == "com.apple.android.music" }
             ?: apps.firstOrNull { Folders.folderOf(this, it.pkg, it.label) == "musica" }
         if (music == null) toast("Nenhum app de música instalado") else Apps.launch(this, music.pkg)
     }
@@ -829,6 +840,11 @@ class MainActivity : Activity() {
         private val VIOLET_DIM = Color.parseColor("#66A855F7")
         private val OK = Color.parseColor("#34D399")
         private val WARN = Color.parseColor("#FBBF24")
+
+        /** Whether the home is on screen (music search brings it back afterwards). */
+        @Volatile
+        var visible = false
+            private set
 
         /** App artwork, kept in memory so going back home never reloads it. */
         private val icons = ConcurrentHashMap<String, Drawable>()

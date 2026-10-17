@@ -220,6 +220,27 @@ class ControlServer(
                 ok()
             }
 
+            path == "/api/media" -> ok(MusicBridge.state(context))
+
+            path == "/api/media/art" -> {
+                val jpg = MusicBridge.artPng(context) ?: return error(Response.Status.NOT_FOUND, "Sem capa")
+                newFixedLengthResponse(Response.Status.OK, "image/jpeg", jpg.inputStream(), jpg.size.toLong())
+            }
+
+            path == "/api/media/control" && post -> {
+                val body = body(session)
+                MusicBridge.control(context, body.getString("action"), body.optLong("value"))
+                ok()
+            }
+
+            path == "/api/media/search" && post -> {
+                val body = body(session)
+                val query = body.optString("query").trim()
+                if (query.isEmpty()) throw IllegalArgumentException("Digite o que quer ouvir")
+                MusicBridge.search(context, query, body.optBoolean("play", true))
+                ok()
+            }
+
             path == "/api/home/layout" && !post -> ok(HomePrefs.describe(context))
 
             path == "/api/home/layout" && post -> {
