@@ -14,11 +14,16 @@ object HomePrefs {
         prefs(context).edit().putString("name", name.trim().take(40)).apply()
     }
 
-    /** The 3 featured apps; empty slots are filled with Netflix and the favorites. */
+    /**
+     * The 3 featured apps. Empty slots are filled with Netflix, then the favorites, then
+     * film/series, live TV and music apps — never with system tools.
+     */
     fun featured(context: Context, installed: List<String>): List<String> {
         val saved = JSONArray(prefs(context).getString("featured", "[]"))
         val chosen = List(FEATURED_SLOTS) { saved.optString(it).takeIf { pkg -> pkg in installed } }
-        val fillers = (listOf("com.netflix.ninja") + Apps.favorites(context) + installed)
+        val byFolder = installed.groupBy { Folders.folderOf(context, it, Apps.label(context, it)) }
+        val fillers = (listOf("com.netflix.ninja") + Apps.favorites(context) +
+            byFolder["filmes"].orEmpty() + byFolder["canais"].orEmpty() + byFolder["musica"].orEmpty())
             .filter { it in installed && it !in chosen }
             .distinct()
             .iterator()

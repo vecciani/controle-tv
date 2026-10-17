@@ -155,6 +155,9 @@ class MainActivity : Activity() {
         val content = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(u(3.5f), u(2f), u(3.5f), 0)
+            // Let the focused card's ring and zoom spill into the margins instead of being cut
+            clipChildren = false
+            clipToPadding = false
         }
 
         // Top bar: status, clock and the Wi-Fi button on the right
