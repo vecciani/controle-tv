@@ -270,6 +270,9 @@ class PhoneActivity : Activity() {
         }
 
         @JavascriptInterface
+        fun airMouseSent(): Long = airMouse?.sent ?: 0
+
+        @JavascriptInterface
         fun hasGyroscope(): Boolean = (getSystemService(SENSOR_SERVICE) as android.hardware.SensorManager)
             .getDefaultSensor(android.hardware.Sensor.TYPE_GYROSCOPE) != null
 

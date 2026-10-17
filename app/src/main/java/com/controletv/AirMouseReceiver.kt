@@ -12,6 +12,16 @@ import java.net.DatagramSocket
  * Packet: "<token>|<dx>|<dy>" with dx/dy as fractions of the screen width/height.
  */
 class AirMouseReceiver(private val context: Context, private val pairing: Pairing) {
+    companion object {
+        const val PORT = 8766
+
+        /** Movements received / rejected, for the diagnostics in the phone's settings. */
+        @Volatile var received = 0L
+            private set
+        @Volatile var rejected = 0L
+            private set
+    }
+
     @Volatile private var socket: DatagramSocket? = null
 
     fun start() {
@@ -28,9 +38,10 @@ class AirMouseReceiver(private val context: Context, private val pairing: Pairin
                     val parts = String(packet.data, 0, packet.length).split('|')
                     if (parts.size != 3) continue
                     if (parts[0] != trusted) {
-                        if (!pairing.isValid(parts[0])) continue
+                        if (!pairing.isValid(parts[0])) { rejected++; continue }
                         trusted = parts[0]
                     }
+                    received++
                     val dx = parts[1].toFloatOrNull() ?: continue
                     val dy = parts[2].toFloatOrNull() ?: continue
                     MouseCursor.moveNow(context, dx.coerceIn(-1f, 1f), dy.coerceIn(-1f, 1f))
@@ -45,7 +56,4 @@ class AirMouseReceiver(private val context: Context, private val pairing: Pairin
         socket?.close()
     }
 
-    companion object {
-        const val PORT = 8766
-    }
 }

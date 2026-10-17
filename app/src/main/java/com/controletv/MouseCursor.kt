@@ -30,6 +30,11 @@ object MouseCursor {
     private var width = 1920
     private var height = 1080
     private val hide = Runnable { view?.visibility = View.GONE }
+    private var askedOverlayAt = 0L
+
+    /** Why the pointer can't be shown, if it can't (for the phone's settings). */
+    @Volatile var problem: String? = null
+        private set
 
     /** Moves by a fraction of the screen width/height (what the phone's pad reports). */
     fun move(context: Context, fx: Float, fy: Float) {
@@ -97,10 +102,18 @@ object MouseCursor {
     private fun ensureOverlay(context: Context) {
         if (view != null) return
         if (!Settings.canDrawOverlays(context)) {
-            // Allowed through ADB (granted by the phone's connection); the next call will work
-            Thread { runCatching { Adb.shell("appops set ${context.packageName} SYSTEM_ALERT_WINDOW allow") } }.start()
-            throw IllegalStateException("Liberando a setinha na TV… tente de novo em 2 segundos")
+            // Allowed through ADB (granted by the phone's connection); asked at most every 5 s
+            val now = System.currentTimeMillis()
+            if (now - askedOverlayAt > 5_000) {
+                askedOverlayAt = now
+                Thread {
+                    problem = runCatching { Adb.shell("appops set ${context.packageName} SYSTEM_ALERT_WINDOW allow") }
+                        .fold({ null }, { "A TV não liberou a setinha: ${it.message}" })
+                }.start()
+            }
+            throw IllegalStateException(problem ?: "Liberando a setinha na TV… tente de novo em 2 segundos")
         }
+        problem = null
         val wm = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
         val metrics = DisplayMetrics()
         @Suppress("DEPRECATION")
