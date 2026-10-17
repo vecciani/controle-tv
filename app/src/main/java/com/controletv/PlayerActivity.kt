@@ -5,12 +5,15 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.graphics.Bitmap
 import android.graphics.Color
 import android.os.Handler
 import android.os.Looper
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.KeyEvent
+import android.view.PixelCopy
+import android.view.SurfaceView
 import android.view.ViewGroup.LayoutParams.MATCH_PARENT
 import android.view.ViewGroup.LayoutParams.WRAP_CONTENT
 import android.view.WindowManager
@@ -580,9 +583,45 @@ class PlayerActivity : Activity() {
         return super.dispatchKeyEvent(event)
     }
 
+    override fun onPause() {
+        // Remember where we stopped ("Continuar assistindo"), before the video surface goes away
+        saveProgress()
+        super.onPause()
+    }
+
     override fun onStop() {
         super.onStop()
         player?.pause()
+    }
+
+    /** Saves the position and a frame of the current video to the watch history. */
+    private fun saveProgress() {
+        val p = player ?: return
+        val request = current ?: return
+        val url = request.url
+        if (!url.startsWith("http")) return
+        val item = WatchHistory.Item(
+            id = WatchHistory.idFor(url),
+            title = request.title ?: Uri.parse(url).lastPathSegment ?: "Vídeo",
+            url = url, type = request.type, subtitles = request.subtitles, subtitleNames = request.subtitleNames,
+            headers = request.headers, position = p.currentPosition, duration = p.duration.coerceAtLeast(0),
+            updatedAt = System.currentTimeMillis(),
+        )
+        val surface = view.videoSurfaceView as? SurfaceView
+        val size = p.videoSize
+        if (surface == null || size.width <= 0 || !surface.holder.surface.isValid) {
+            Thread { WatchHistory.save(this, item, null) }.start()
+            return
+        }
+        // Grab the frame on screen as the card picture (DRM-protected video just comes out black)
+        val scale = minOf(1f, 640f / size.width)
+        val frame = Bitmap.createBitmap((size.width * scale).toInt().coerceAtLeast(1), (size.height * scale).toInt().coerceAtLeast(1), Bitmap.Config.ARGB_8888)
+        val app = applicationContext
+        runCatching {
+            PixelCopy.request(surface, frame, { result ->
+                Thread { WatchHistory.save(app, item, if (result == PixelCopy.SUCCESS) frame else null) }.start()
+            }, ticker)
+        }.onFailure { Thread { WatchHistory.save(app, item, null) }.start() }
     }
 
     override fun onDestroy() {

@@ -31,7 +31,9 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
+import android.text.Editable
 import android.text.SpannableString
+import android.text.TextWatcher
 import android.text.TextUtils
 import android.text.style.ForegroundColorSpan
 import android.view.Gravity
@@ -43,6 +45,7 @@ import android.view.ViewOutlineProvider
 import android.view.Window
 import android.view.animation.DecelerateInterpolator
 import android.widget.Button
+import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
 import android.widget.ImageView
@@ -188,6 +191,25 @@ class MainActivity : Activity() {
             setPadding(0, 0, 0, u(8f))
         }
 
+        // Search bar: apps, music in AuraMusic, videos on YouTube
+        val searchBar = Button(this).apply {
+            text = "Pesquisar apps, músicas e vídeos…"
+            isAllCaps = false
+            textSize = px(1.3f)
+            setTextColor(MUTED)
+            gravity = Gravity.START or Gravity.CENTER_VERTICAL
+            setPadding(u(1.6f), u(0.9f), u(1.6f), u(0.9f))
+            val icon = getDrawable(R.drawable.ic_m_search)!!.apply { setBounds(0, 0, u(1.6f), u(1.6f)) }
+            setCompoundDrawables(icon, null, null, null)
+            compoundDrawablePadding = u(1f)
+            background = StateListDrawable().apply {
+                addState(intArrayOf(android.R.attr.state_focused), rounded(0x3322D3EE, u(3f).toFloat(), CYAN))
+                addState(intArrayOf(), rounded(0xCC12121D.toInt(), u(3f).toFloat(), LINE))
+            }
+            setOnClickListener { SearchDialog().show() }
+        }
+        page.addView(searchBar, LinearLayout.LayoutParams(u(40f), WRAP_CONTENT).apply { topMargin = u(1.2f) })
+
         // Greeting on the left, music widget on the right
         val header = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -285,7 +307,8 @@ class MainActivity : Activity() {
             val rowOrder = HomePrefs.rowOrder(this)
             val sorted = rowOrder.associateWith { id -> HomePrefs.sortFolder(this, id, apps.filter { folders[it.pkg] == id }) }
             val featured = HomePrefs.featured(this, apps.map { it.pkg })
-            val signature = rowOrder.joinToString { id -> id + ":" + sorted[id]!!.joinToString(",") { it.pkg } } +
+            val signature = WatchHistory.list(this).joinToString { it.id + it.position / 60_000 } + WatchNext.entries().size +
+                rowOrder.joinToString { id -> id + ":" + sorted[id]!!.joinToString(",") { it.pkg } } +
                 "|" + featured.joinToString() + "|" + favorites.joinToString()
             runOnUiThread {
                 if (!force && signature == shownSignature) return@runOnUiThread
@@ -297,6 +320,11 @@ class MainActivity : Activity() {
                 val featuredWidth = (resources.displayMetrics.widthPixels - u(7f) - u(2.6f) * 2) / HomePrefs.FEATURED_SLOTS
                 featured.mapNotNull { byPkg[it] }.forEach { app ->
                     featuredRow.addView(appCard(app, app.pkg in favorites, Folders.ALL.firstOrNull { it.id == folders[app.pkg] }?.title ?: "Destaque", featuredWidth, "feat:"))
+                }
+                val history = WatchHistory.list(this)
+                val watchNext = WatchNext.entries()
+                if (history.isNotEmpty() || watchNext.isNotEmpty()) {
+                    rows.addView(row("Continuar assistindo", history.map { historyCard(it) } + watchNext.map { watchNextCard(it) }))
                 }
                 if (favorites.isNotEmpty()) {
                     rows.addView(row("Favoritos", favorites.mapNotNull { byPkg[it] }.map { appCard(it, true) }, R.drawable.ic_star))
@@ -366,6 +394,112 @@ class MainActivity : Activity() {
             Apps.launch(this, app.pkg)
         }
 
+    private fun historyCard(item: WatchHistory.Item): View {
+        val remaining = ((item.duration - item.position) / 60_000).coerceAtLeast(1)
+        return card(
+            key = "hist:${item.id}", title = item.title,
+            subtitle = if (item.duration > 0) "Faltam $remaining min" else "Continuar",
+            favorite = false, progress = item.progress,
+            bindImage = { image ->
+                val thumb = WatchHistory.thumb(this, item.id)
+                if (thumb.exists()) loader.execute {
+                    val bitmap = BitmapFactory.decodeFile(thumb.path)
+                    runOnUiThread { image.setImageBitmap(bitmap) }
+                } else image.setImageResource(R.drawable.ic_t_display)
+            },
+            onOptions = {
+                val dialog = OptionsDialog(item.title)
+                dialog.add("Continuar de onde parou") { resume(item) }
+                dialog.add("Assistir do começo") { resume(item.copy(position = 0)) }
+                dialog.add("Tirar desta lista") { WatchHistory.remove(this, item.id); loadApps(force = true) }
+                dialog.show()
+            },
+        ) { resume(item) }
+    }
+
+    private fun resume(item: WatchHistory.Item) {
+        toast("Continuando ${item.title}")
+        PlayerActivity.open(this, item.url, item.title, item.type, item.subtitles, item.subtitleNames, item.position, item.headers)
+    }
+
+    private fun watchNextCard(entry: WatchNext.Entry): View = card(
+        key = "wn:${entry.pkg}:${entry.title}", title = entry.title, subtitle = Apps.label(this, entry.pkg), favorite = false,
+        bindImage = { loadIcon(entry.pkg, it) },
+    ) {
+        runCatching {
+            startActivity(Intent.parseUri(entry.intentUri, Intent.URI_INTENT_SCHEME).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        }.onFailure { Apps.launch(this, entry.pkg) }
+    }
+
+    /** Search everything from one place: installed apps, music (AuraMusic) and YouTube. */
+    private inner class SearchDialog : Dialog(this@MainActivity) {
+        private val results = LinearLayout(this@MainActivity).apply { orientation = LinearLayout.VERTICAL }
+        private val apps = Apps.list(this@MainActivity).filter { it.pkg !in HomePrefs.hidden(this@MainActivity) }
+
+        init {
+            requestWindowFeature(Window.FEATURE_NO_TITLE)
+            val box = LinearLayout(this@MainActivity).apply {
+                orientation = LinearLayout.VERTICAL
+                background = rounded(SURFACE, u(1.4f).toFloat(), CYAN_DIM)
+                setPadding(u(2f), u(1.8f), u(2f), u(1.8f))
+            }
+            val field = EditText(this@MainActivity).apply {
+                hint = "Digite (ou use o Teclado do celular)"
+                setHintTextColor(MUTED)
+                setTextColor(TEXT)
+                textSize = px(1.6f)
+                isSingleLine = true
+                background = rounded(BG, u(1f).toFloat(), CYAN)
+                setPadding(u(1.4f), u(1f), u(1.4f), u(1f))
+                addTextChangedListener(object : TextWatcher {
+                    override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+                    override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+                    override fun afterTextChanged(s: Editable?) = render(s.toString().trim())
+                })
+            }
+            box.addView(field, LinearLayout.LayoutParams(u(42f), WRAP_CONTENT).apply { bottomMargin = u(1.2f) })
+            box.addView(ScrollView(this@MainActivity).apply { addView(results) }, LinearLayout.LayoutParams(u(42f), u(26f)))
+            setContentView(box)
+            window?.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+            render("")
+        }
+
+        private fun render(query: String) {
+            results.removeAllViews()
+            if (query.isEmpty()) {
+                results.addView(text(1.2f, MUTED).apply { text = "Apps, músicas no AuraMusic e vídeos no YouTube" })
+                return
+            }
+            if (MusicBridge.musicApp(this@MainActivity) != null) {
+                option("Tocar \"$query\" no AuraMusic") { runCatching { MusicBridge.search(this@MainActivity, query, true) }.onFailure { toast(it.message ?: "Falhou") } }
+            }
+            option("Buscar \"$query\" no YouTube") {
+                runCatching {
+                    startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/results?search_query=" + Uri.encode(query))).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                }.onFailure { toast("Nenhum app de YouTube instalado") }
+            }
+            apps.filter { it.label.contains(query, ignoreCase = true) }.take(8).forEach { app ->
+                option("Abrir ${app.label}") { Apps.launch(this@MainActivity, app.pkg) }
+            }
+        }
+
+        private fun option(label: String, action: () -> Unit) {
+            results.addView(Button(this@MainActivity).apply {
+                text = label
+                isAllCaps = false
+                textSize = px(1.35f)
+                setTextColor(TEXT)
+                gravity = Gravity.START or Gravity.CENTER_VERTICAL
+                setPadding(u(1.4f), u(0.8f), u(1.4f), u(0.8f))
+                background = StateListDrawable().apply {
+                    addState(intArrayOf(android.R.attr.state_focused), rounded(0x3322D3EE, u(0.8f).toFloat(), CYAN))
+                    addState(intArrayOf(), rounded(Color.TRANSPARENT, u(0.8f).toFloat(), Color.TRANSPARENT))
+                }
+                setOnClickListener { dismiss(); action() }
+            }, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { bottomMargin = u(0.3f) })
+        }
+    }
+
     /** Fire TV's own screens, as on the Amazon home. Shortcuts the TV doesn't have are left out. */
     private fun settingsTiles(): List<View> {
         val tiles = mutableListOf<View>()
@@ -393,7 +527,8 @@ class MainActivity : Activity() {
 
     private fun card(
         key: String, title: String, subtitle: String, favorite: Boolean, bindImage: (ImageView) -> Unit,
-        iconTile: Boolean = false, width: Int = u(13.5f), onOptions: (() -> Unit)? = null, onClick: () -> Unit,
+        iconTile: Boolean = false, width: Int = u(13.5f), progress: Float? = null,
+        onOptions: (() -> Unit)? = null, onClick: () -> Unit,
     ): View {
         val w = width
         val h = w * 9 / 16
@@ -425,6 +560,12 @@ class MainActivity : Activity() {
                 ellipsize = TextUtils.TruncateAt.END
                 setPadding(u(0.5f), 0, u(0.5f), h / 8)
             }, FrameLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT, Gravity.BOTTOM))
+        }
+        if (progress != null) {
+            // Watched part of the video, along the bottom edge
+            val track = FrameLayout(this).apply { setBackgroundColor(0x99000000.toInt()) }
+            track.addView(View(this).apply { setBackgroundColor(CYAN) }, FrameLayout.LayoutParams((w * progress.coerceIn(0f, 1f)).toInt(), MATCH_PARENT))
+            art.addView(track, FrameLayout.LayoutParams(MATCH_PARENT, maxOf(3, u(0.35f)), Gravity.BOTTOM))
         }
         val ring = View(this).apply {
             background = GradientDrawable().apply {
@@ -766,6 +907,7 @@ class MainActivity : Activity() {
 
         updateWifi()
         updateMusic()
+        if (Adb.state == Adb.State.OK) loader.execute { WatchNext.refresh() }
 
         // The layout may have been changed from the phone
         if (HomePrefs.changes != shownChanges) {
