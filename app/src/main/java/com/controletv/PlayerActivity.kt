@@ -27,6 +27,7 @@ import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.Tracks
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.DefaultRenderersFactory
+import androidx.media3.exoplayer.upstream.DefaultBandwidthMeter
 import androidx.media3.exoplayer.audio.AudioCapabilities
 import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.audio.DefaultAudioSink
@@ -308,6 +309,8 @@ class PlayerActivity : Activity() {
             }
         }
         player = ExoPlayer.Builder(this, renderers)
+            // Start streams at high quality instead of climbing up from the lowest one
+            .setBandwidthMeter(DefaultBandwidthMeter.Builder(this).setInitialBitrateEstimate(INITIAL_BITRATE).build())
             .setMediaSourceFactory(DefaultMediaSourceFactory(DefaultDataSource.Factory(this, http)))
             .setSeekBackIncrementMs(10_000)
             .setSeekForwardIncrementMs(10_000)
@@ -317,7 +320,7 @@ class PlayerActivity : Activity() {
                 // Subtitles inside the stream turn on by themselves in the chosen language,
                 // unless one of our subtitle files is already showing
                 val language = subtitleLanguage(this)
-                p.trackSelectionParameters = p.trackSelectionParameters.buildUpon()
+                p.trackSelectionParameters = withQuality(p.trackSelectionParameters.buildUpon(), quality(this))
                     .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, language == "off" || activeSub >= 0 || autoActive)
                     .setPreferredTextLanguages(*Subtitles.codesFor(language))
                     .setSelectUndeterminedTextLanguage(true)
@@ -461,6 +464,48 @@ class PlayerActivity : Activity() {
             .put("offsetMs", offsetMs)
             .put("canSync", activeSub >= 0 && !autoActive)
             .put("autoCc", AutoCaptions.json())
+            .put("quality", quality(this))
+            .put("currentHeight", p?.videoSize?.height ?: 0)
+            .put("heights", JSONArray(videoTracks().map { it.first.getTrackFormat(it.second).height }.filter { it > 0 }.distinct()))
+    }
+
+    // ---------- Quality and seeking ----------
+
+    /** Video tracks of the current stream, best first. */
+    private fun videoTracks(): List<Pair<Tracks.Group, Int>> {
+        val p = player ?: return emptyList()
+        return p.currentTracks.groups.filter { it.type == C.TRACK_TYPE_VIDEO }
+            .flatMap { group -> (0 until group.length).filter { group.isTrackSupported(it) }.map { group to it } }
+            .sortedWith(compareByDescending<Pair<Tracks.Group, Int>> { it.first.getTrackFormat(it.second).height }
+                .thenByDescending { it.first.getTrackFormat(it.second).bitrate })
+    }
+
+    /**
+     * Applies a quality policy: "auto" (adapts to the network), "max" (always the best the TV
+     * can play) or "h<height>" (the best up to that height, e.g. "h720").
+     */
+    private fun withQuality(builder: androidx.media3.common.TrackSelectionParameters.Builder, policy: String) =
+        builder.clearOverridesOfType(C.TRACK_TYPE_VIDEO).apply {
+            val cap = policy.removePrefix("h").toIntOrNull()
+            when {
+                policy == "max" -> setForceHighestSupportedBitrate(true).clearVideoSizeConstraints()
+                cap != null -> setForceHighestSupportedBitrate(true).setMaxVideoSize(Int.MAX_VALUE, cap)
+                else -> setForceHighestSupportedBitrate(false).clearVideoSizeConstraints()
+            }
+        }
+
+    private fun applyQuality(policy: String) {
+        setQuality(this, policy)
+        val p = player ?: return
+        p.trackSelectionParameters = withQuality(p.trackSelectionParameters.buildUpon(), policy).build()
+    }
+
+    private fun seek(deltaMs: Long?, positionMs: Long?) {
+        val p = player ?: return
+        val duration = p.duration.takeIf { it > 0 } ?: Long.MAX_VALUE
+        val target = positionMs ?: (p.currentPosition + (deltaMs ?: 0))
+        p.seekTo(target.coerceIn(0, duration))
+        view.showController()
     }
 
     /** "e<n>" = one of our subtitle files, "i<n>" = a subtitle inside the stream, "off" = none. */
@@ -559,6 +604,7 @@ class PlayerActivity : Activity() {
         private const val EXTRA_SUBTITLE_NAMES = "subtitleNames"
         private const val EXTRA_POSITION = "position"
         private const val EXTRA_HEADERS = "headers"
+        private const val INITIAL_BITRATE = 8_000_000L
         private const val USER_AGENT = "Mozilla/5.0 (Linux; Android 9) ControleTV"
         private val DPAD_KEYS = setOf(
             KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_DPAD_LEFT,
@@ -613,6 +659,20 @@ class PlayerActivity : Activity() {
         fun addSubtitle(file: File, label: String): Boolean? = onPlayer { addSubtitle(file, label) }
 
         fun shiftSubtitle(deltaMs: Long?, reset: Boolean) = onPlayer { shift(deltaMs, reset) } != null
+
+        fun seekTo(deltaMs: Long?, positionMs: Long?) = onPlayer { seek(deltaMs, positionMs) } != null
+
+        /** Saves the quality policy and applies it to the video playing now, if any. */
+        fun changeQuality(context: Context, policy: String) {
+            if (onPlayer { applyQuality(policy) } == null) setQuality(context, policy)
+        }
+
+        fun quality(context: Context): String =
+            context.getSharedPreferences("player", Context.MODE_PRIVATE).getString("quality", "auto")!!
+
+        private fun setQuality(context: Context, policy: String) {
+            context.getSharedPreferences("player", Context.MODE_PRIVATE).edit().putString("quality", policy).apply()
+        }
 
         fun open(
             context: Context, url: String, title: String?, type: String?,

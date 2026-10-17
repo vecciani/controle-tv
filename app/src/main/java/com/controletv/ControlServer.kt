@@ -168,6 +168,21 @@ class ControlServer(
                 ok()
             }
 
+            path == "/api/player/seek" && post -> {
+                val body = body(session)
+                val delta = if (body.has("deltaMs")) body.getLong("deltaMs") else null
+                val position = if (body.has("positionMs")) body.getLong("positionMs") else null
+                if (!PlayerActivity.seekTo(delta, position)) throw IllegalStateException("Nenhum vídeo tocando")
+                ok()
+            }
+
+            path == "/api/player/quality" && post -> {
+                val policy = body(session).getString("quality")
+                if (!Regex("auto|max|h\\d{3,4}").matches(policy)) throw IllegalArgumentException("Qualidade inválida")
+                PlayerActivity.changeQuality(context, policy)
+                ok()
+            }
+
             path == "/api/player/sync" && post -> {
                 val body = body(session)
                 val delta = if (body.has("deltaMs")) body.getLong("deltaMs") else null

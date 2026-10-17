@@ -698,6 +698,135 @@ async function probeSheet() {
 $('open-settings').addEventListener('click', settingsSheet);
 $('status-pill').addEventListener('click', settingsSheet);
 
+// ---------- Video: seeking and quality ----------
+
+const fmtTime = (ms) => {
+  const t = Math.max(0, Math.floor(ms / 1000));
+  const h = Math.floor(t / 3600);
+  const m = Math.floor((t % 3600) / 60);
+  const sec = String(t % 60).padStart(2, '0');
+  return h ? `${h}:${String(m).padStart(2, '0')}:${sec}` : `${m}:${sec}`;
+};
+
+// "1:25:00", "25:30" or just "85" (minutes) -> milliseconds
+function parseTime(text) {
+  const clean = text.trim().replace(',', '.');
+  if (!clean) return null;
+  if (!clean.includes(':')) {
+    const minutes = Number(clean);
+    return Number.isFinite(minutes) ? Math.round(minutes * 60000) : null;
+  }
+  const parts = clean.split(':').map(Number);
+  if (parts.some((n) => !Number.isFinite(n))) return null;
+  return parts.reduce((acc, n) => acc * 60 + n, 0) * 1000;
+}
+
+let videoTimer = null;
+
+$('video-btn').addEventListener('click', videoSheet);
+
+async function videoSheet() {
+  clearInterval(videoTimer);
+  let player;
+  try { player = await api('/api/player'); } catch (e) { toast(e.message, true); return; }
+  if (player.closed) { toast('Nenhum vídeo tocando no player do Controle TV', true); return; }
+
+  const sheet = openSheet(`
+    <div class="sheet-head"><div><h3>Vídeo</h3><p id="v-title"></p></div></div>
+    <div class="time-now"><strong id="v-pos">0:00</strong><span id="v-dur">0:00</span></div>
+    <input type="range" class="seekbar" id="v-seek" min="0" max="1000" value="0">
+    <h4>Pular minutos</h4>
+    <div class="jump-row">
+      <button id="v-back">${icon('rewind')} Voltar</button>
+      <input id="v-minutes" inputmode="decimal" placeholder="min" value="5">
+      <button class="fwd" id="v-fwd">Avançar ${icon('forward')}</button>
+    </div>
+    <h4>Ir para</h4>
+    <div class="goto-row">
+      <input id="v-goto" inputmode="text" placeholder="ex.: 1:25:00 ou 85">
+      <button id="v-go">Ir</button>
+    </div>
+    <h4>Qualidade</h4>
+    <div class="quality-row" id="v-quality"></div>
+    <p class="hint small" id="v-playing"></p>`);
+  sheet.querySelector('#v-title').textContent = player.title || 'Vídeo na TV';
+
+  const seek = async (body) => {
+    buzz(15);
+    try { await api('/api/player/seek', body); setTimeout(refresh, 400); } catch (e) { toast(e.message, true); }
+  };
+  const minutes = () => {
+    const ms = parseTime(sheet.querySelector('#v-minutes').value);
+    if (!ms) toast('Digite quantos minutos pular', true);
+    return ms;
+  };
+  sheet.querySelector('#v-back').onclick = () => { const ms = minutes(); if (ms) seek({ deltaMs: -ms }); };
+  sheet.querySelector('#v-fwd').onclick = () => { const ms = minutes(); if (ms) seek({ deltaMs: ms }); };
+  sheet.querySelector('#v-go').onclick = () => {
+    const ms = parseTime(sheet.querySelector('#v-goto').value);
+    if (ms == null) { toast('Use o formato 1:25:00, 25:30 ou só os minutos', true); return; }
+    seek({ positionMs: ms });
+  };
+
+  const bar = sheet.querySelector('#v-seek');
+  let dragging = false;
+  bar.addEventListener('input', () => {
+    dragging = true;
+    sheet.querySelector('#v-pos').textContent = fmtTime(bar.value / 1000 * player.duration);
+  });
+  bar.addEventListener('change', () => {
+    dragging = false;
+    seek({ positionMs: Math.round(bar.value / 1000 * player.duration) });
+  });
+
+  const renderQuality = () => {
+    const options = [['auto', 'Automática'], ['max', 'Sempre a máxima'],
+      ...player.heights.map((h) => [`h${h}`, `${h}p`])];
+    sheet.querySelector('#v-quality').replaceChildren(...options.map(([policy, label]) => {
+      const btn = document.createElement('button');
+      btn.textContent = label;
+      btn.classList.toggle('on', policy === player.quality);
+      btn.onclick = async () => {
+        try {
+          await api('/api/player/quality', { quality: policy });
+          player.quality = policy;
+          renderQuality();
+          toast(`Qualidade: ${label}`);
+        } catch (e) { toast(e.message, true); }
+      };
+      return btn;
+    }));
+    sheet.querySelector('#v-playing').textContent = player.currentHeight
+      ? `Tocando agora em ${player.currentHeight}p. A escolha fica salva para os próximos vídeos.`
+      : 'A escolha fica salva para os próximos vídeos.';
+  };
+
+  const render = () => {
+    sheet.querySelector('#v-dur').textContent = player.duration ? fmtTime(player.duration) : 'ao vivo';
+    if (!dragging) {
+      sheet.querySelector('#v-pos').textContent = fmtTime(player.position);
+      bar.value = player.duration ? Math.round(player.position / player.duration * 1000) : 0;
+    }
+    bar.disabled = !player.duration;
+  };
+
+  async function refresh() {
+    if ($('sheet').hidden || !sheet.querySelector('#v-seek')) { clearInterval(videoTimer); return; }
+    try {
+      const next = await api('/api/player');
+      if (next.closed) return;
+      const heightsChanged = JSON.stringify(next.heights) !== JSON.stringify(player.heights) || next.currentHeight !== player.currentHeight;
+      player = next;
+      render();
+      if (heightsChanged) renderQuality();
+    } catch {}
+  }
+
+  render();
+  renderQuality();
+  videoTimer = setInterval(refresh, 1000);
+}
+
 // ---------- Subtitles ----------
 
 const LANGS = [['en', 'Inglês'], ['auto', 'Automática (CC)'], ['pt', 'Português'], ['es', 'Espanhol'], ['off', 'Desligada']];

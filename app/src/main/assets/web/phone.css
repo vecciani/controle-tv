@@ -297,7 +297,7 @@ main { padding: 4px 16px calc(96px + env(safe-area-inset-bottom)); }
 .cast-tip b { color: var(--text); }
 .cast-tip .round { width: 32px; height: 32px; }
 .cast-tip .round svg { width: 16px; height: 16px; }
-.subs-btn { width: 100%; margin-top: 12px; }
+.row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 12px; }
 .lang-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-bottom: 14px; }
 .lang-row button { padding: 10px 4px; border-radius: 12px; background: var(--surface); border: 1px solid var(--line); font-size: 13px; color: var(--muted); }
 .lang-row button.on { color: var(--cyan); border-color: rgba(34, 211, 238, .5); background: rgba(34, 211, 238, .08); }
@@ -306,3 +306,18 @@ main { padding: 4px 16px calc(96px + env(safe-area-inset-bottom)); }
 .sync-row button { padding: 12px 0; border-radius: 12px; background: var(--surface); border: 1px solid var(--line); font-size: 14px; }
 .sync-row button:active { background: rgba(34, 211, 238, .12); }
 .sync-row strong { text-align: center; font-size: 16px; color: var(--cyan); font-variant-numeric: tabular-nums; }
+.time-now { display: flex; justify-content: space-between; font-variant-numeric: tabular-nums; color: var(--muted); font-size: 13px; margin: 4px 0 6px; }
+.time-now strong { color: var(--text); font-size: 15px; }
+.seekbar { width: 100%; accent-color: var(--cyan); margin: 0 0 6px; }
+.jump-row { display: grid; grid-template-columns: 1fr 1.3fr 1fr; gap: 8px; align-items: stretch; }
+.jump-row input, .goto-row input {
+  min-width: 0; padding: 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface);
+  color: var(--text); font: inherit; font-size: 17px; text-align: center;
+}
+.jump-row input:focus, .goto-row input:focus { outline: none; box-shadow: var(--glow-cyan); }
+.jump-row button, .goto-row button { padding: 12px 6px; border-radius: 12px; background: var(--surface); border: 1px solid var(--line); font-size: 14px; }
+.jump-row button.fwd, .goto-row button { color: var(--cyan); border-color: rgba(34, 211, 238, .4); }
+.goto-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
+.quality-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.quality-row button { padding: 10px 14px; border-radius: 12px; background: var(--surface); border: 1px solid var(--line); font-size: 14px; color: var(--muted); }
+.quality-row button.on { color: var(--cyan); border-color: rgba(34, 211, 238, .5); background: rgba(34, 211, 238, .08); }
