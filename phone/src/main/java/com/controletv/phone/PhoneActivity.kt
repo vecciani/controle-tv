@@ -109,6 +109,10 @@ class PhoneActivity : Activity() {
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
             addJavascriptInterface(Bridge(), "ControleNative")
+            // Holding a finger down is a remote-control gesture, not "select text / copy"
+            setOnLongClickListener { true }
+            isLongClickable = false
+            isHapticFeedbackEnabled = false
             webViewClient = object : WebViewClient() {
                 override fun onPageFinished(view: WebView, url: String) {
                     finished = true

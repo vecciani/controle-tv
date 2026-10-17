@@ -166,6 +166,10 @@ function mouseClick(long) {
   api('/api/mouse/click', { long }).catch((e) => toast(e.message, true));
 }
 
+// No context menu or text selection on the pad: a long hold is a gesture here
+pad.addEventListener('contextmenu', (e) => e.preventDefault());
+pad.addEventListener('selectstart', (e) => e.preventDefault());
+
 pad.addEventListener('pointerdown', (e) => {
   pad.setPointerCapture(e.pointerId);
   const box = pad.getBoundingClientRect();

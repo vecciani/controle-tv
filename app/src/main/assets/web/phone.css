@@ -342,3 +342,9 @@ main { padding: 4px 16px calc(96px + env(safe-area-inset-bottom)); }
 .transfer .space-bar { margin-top: 8px; }
 .name-input { width: 100%; padding: 13px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface); color: var(--text); font: inherit; margin-bottom: 12px; }
 .name-input:focus { outline: none; box-shadow: var(--glow-cyan); }
+
+/* Holding a finger down is a control gesture here (air mouse, long click): never select text
+   or show the copy/paste menu, except in the places where you actually type */
+body { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+input, textarea, .report { -webkit-user-select: text; user-select: text; -webkit-touch-callout: default; }
+.touchpad, .touchpad * { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
