@@ -379,3 +379,24 @@ input, textarea, .report { -webkit-user-select: text; user-select: text; -webkit
 .mouse-left { background: var(--neon); color: var(--bg); box-shadow: 0 0 30px rgba(34, 211, 238, .25); }
 .mouse-right { background: var(--surface); border: 1px solid var(--line); color: var(--text); }
 .mouse-buttons button:active { transform: scale(.97); }
+.install-btn + .install-btn { margin-top: -4px; }
+.le-section { margin-bottom: 18px; }
+.le-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.le-head h4 { flex: 1; margin: 0; }
+.le-head button { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; background: var(--surface); border: 1px solid var(--line); }
+.le-head button svg { width: 18px; height: 18px; }
+.le-head button:disabled { opacity: .3; }
+.le-list { display: flex; flex-direction: column; gap: 6px; min-height: 48px; padding: 4px; border-radius: 14px; border: 1px dashed transparent; }
+.le-list.empty { border-color: var(--line); }
+.le-list.target { border-color: rgba(34, 211, 238, .6); background: rgba(34, 211, 238, .05); }
+.le-item { display: flex; align-items: center; gap: 10px; padding: 6px 8px 6px 4px; border-radius: 12px; background: var(--surface); border: 1px solid var(--line); }
+.le-item img { width: 56px; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 8px; background: var(--bg-2); pointer-events: none; }
+.le-item span { flex: 1; min-width: 0; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.le-item .le-grip { width: 34px; height: 40px; display: grid; place-items: center; color: var(--muted); touch-action: none; }
+.le-item .le-toggle { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; color: var(--muted); }
+.le-item .le-toggle svg { width: 18px; height: 18px; }
+.le-item.dragging { opacity: .25; }
+.le-ghost { position: fixed; z-index: 50; pointer-events: none; box-shadow: var(--glow-cyan); opacity: .95; }
+.le-marker { height: 3px; border-radius: 2px; background: var(--cyan); box-shadow: 0 0 10px var(--cyan); margin: -1px 0; }
+.le-featured .le-item { border-color: rgba(168, 85, 247, .45); }
+.le-empty-hint { color: var(--muted); font-size: 12px; text-align: center; padding: 10px 0; }

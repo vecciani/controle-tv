@@ -47,6 +47,7 @@ object Folders {
 
     fun move(context: Context, pkg: String, folder: String) {
         prefs(context).edit().putString(pkg, folder).apply()
+        HomePrefs.changed()
     }
 
     private fun overrides(context: Context): Map<String, String> =

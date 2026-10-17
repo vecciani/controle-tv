@@ -78,9 +78,7 @@ class PlayerActivity : Activity() {
     // Automatic subtitles (speech recognition on the movie's audio)
     private var autoActive = false
     private var engine: CaptionEngine? = null
-    private var autoPartial = ""
-    private var autoFinal = ""
-    private var autoFinalAt = 0L
+    private val chunker = CaptionChunker()
 
     // Subtitle files we draw ourselves, which one is on (-1 = none) and how far it's shifted
     private val subtitleFiles = mutableListOf<Sub>()
@@ -111,12 +109,13 @@ class PlayerActivity : Activity() {
             )
             subtitleView?.setFractionalTextSize(0.06f)
         }
-        captionView = TextView(this).apply {
+        // Film-style: white with a black outline, no box, a bit smaller than before
+        captionView = OutlinedTextView(this).apply {
             setTextColor(Color.WHITE)
-            setTextSize(TypedValue.COMPLEX_UNIT_PX, resources.displayMetrics.heightPixels * 0.055f)
-            setShadowLayer(6f, 0f, 0f, Color.BLACK)
-            setBackgroundColor(0x99000000.toInt())
+            setTextSize(TypedValue.COMPLEX_UNIT_PX, resources.displayMetrics.heightPixels * 0.043f)
+            setShadowLayer(4f, 0f, 2f, 0xAA000000.toInt())
             gravity = Gravity.CENTER
+            setLineSpacing(0f, 1.05f)
             setPadding(24, 6, 24, 8)
             visibility = android.view.View.GONE
         }
@@ -209,12 +208,9 @@ class PlayerActivity : Activity() {
         }.start()
     }
 
-    /** Words being recognized now, or the last sentence for a few seconds after it ends. */
+    /** Film-style blocks from the speech recognizer (see [CaptionChunker]). */
     private fun drawAutoCaption() {
-        val recent = if (System.currentTimeMillis() - autoFinalAt < 3_500) autoFinal else ""
-        var text = autoPartial.ifBlank { recent }
-        // Keep it to about two lines: the most recent words
-        if (text.length > 84) text = "…" + text.takeLast(84).substringAfter(' ')
+        val text = chunker.text(System.currentTimeMillis())
         if (text.isBlank()) {
             captionView.visibility = android.view.View.GONE
         } else {
@@ -243,8 +239,7 @@ class PlayerActivity : Activity() {
     private fun disableAuto() {
         if (!autoActive) return
         autoActive = false
-        autoPartial = ""
-        autoFinal = ""
+        chunker.clear()
         if (engine != null) restartAt(player?.currentPosition ?: 0)
     }
 
@@ -294,8 +289,12 @@ class PlayerActivity : Activity() {
         val renderers = if (model == null) DefaultRenderersFactory(this) else {
             val tap = CaptionEngine(model) { text, final ->
                 runOnUiThread {
-                    if (final) { autoFinal = text; autoFinalAt = System.currentTimeMillis(); autoPartial = "" }
-                    else autoPartial = text
+                    val now = System.currentTimeMillis()
+                    when {
+                        final -> chunker.final(text, now)
+                        text.isEmpty() -> chunker.clear() // seek or new audio
+                        else -> chunker.partial(text, now)
+                    }
                 }
             }
             engine = tap

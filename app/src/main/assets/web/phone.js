@@ -1378,6 +1378,208 @@ $('sub-file').addEventListener('change', async (e) => {
   } catch (err) { toast(err.message, true); }
 });
 
+// ---------- TV home layout editor (drag and drop) ----------
+// Sections: the 3 featured slots, each folder row, and the hidden apps. Drag an app by its
+// handle to reorder, move between folders, feature it or hide it. Saves to the TV by itself.
+
+let layoutModel = null;
+let layoutSaveTimer = null;
+
+$('organize-tv').addEventListener('click', async () => {
+  try {
+    layoutModel = await api('/api/home/layout');
+    renderLayoutEditor();
+  } catch (e) { toast(e.message, true); }
+});
+
+function saveLayout() {
+  clearTimeout(layoutSaveTimer);
+  layoutSaveTimer = setTimeout(async () => {
+    try {
+      await api('/api/home/layout', {
+        featured: layoutModel.featured.map((a) => a.pkg),
+        rows: layoutModel.rows.map((r) => ({ id: r.id, apps: r.apps.map((a) => a.pkg) })),
+        hidden: layoutModel.hidden.map((a) => a.pkg),
+      });
+      toast('Salvo na TV');
+    } catch (e) { toast(e.message, true); }
+  }, 500);
+}
+
+function renderLayoutEditor() {
+  const sheet = openSheet(`
+    <div class="sheet-head"><div><h3>Tela da TV</h3><p>Arraste pela alça ${icon('grip')} para organizar</p></div></div>
+    <div id="le-body"></div>`);
+  const body = sheet.querySelector('#le-body');
+  const section = (id, title, items, { featured = false, rowIndex = -1 } = {}) => {
+    const wrap = document.createElement('div');
+    wrap.className = 'le-section' + (featured ? ' le-featured' : '');
+    const head = document.createElement('div');
+    head.className = 'le-head';
+    head.innerHTML = `<h4></h4>`;
+    head.querySelector('h4').textContent = title;
+    if (rowIndex >= 0) {
+      const up = document.createElement('button');
+      up.innerHTML = icon('up');
+      up.disabled = rowIndex === 0;
+      up.onclick = () => moveRow(rowIndex, -1);
+      const down = document.createElement('button');
+      down.innerHTML = icon('down');
+      down.disabled = rowIndex === layoutModel.rows.length - 1;
+      down.onclick = () => moveRow(rowIndex, 1);
+      head.append(up, down);
+    }
+    const list = document.createElement('div');
+    list.className = 'le-list' + (items.length ? '' : ' empty');
+    list.dataset.section = id;
+    items.forEach((app, i) => list.append(layoutItem(app, id, i)));
+    if (!items.length) list.innerHTML = `<p class="le-empty-hint">${id === 'hidden' ? 'Arraste aqui para esconder' : 'Arraste apps para cá'}</p>`;
+    wrap.append(head, list);
+    return wrap;
+  };
+  body.append(section('featured', 'Destaques (até 3)', layoutModel.featured, { featured: true }));
+  layoutModel.rows.forEach((r, i) => body.append(section(r.id, r.title, r.apps, { rowIndex: i })));
+  body.append(section('hidden', 'Escondidos', layoutModel.hidden));
+}
+
+function layoutItem(app, sectionId, index) {
+  const el = document.createElement('div');
+  el.className = 'le-item';
+  el.innerHTML = `<button class="le-grip" aria-label="Arrastar">${icon('grip')}</button><img alt=""><span></span>
+    <button class="le-toggle" aria-label="${sectionId === 'hidden' ? 'Mostrar' : 'Esconder'}">${icon(sectionId === 'hidden' ? 'eye' : sectionId === 'featured' ? 'x' : 'eyeOff')}</button>`;
+  el.querySelector('img').src = iconUrl(app.pkg);
+  el.querySelector('span').textContent = app.label;
+  el.querySelector('.le-toggle').onclick = () => {
+    buzz(15);
+    if (sectionId === 'hidden') moveApp('hidden', index, layoutModel.rows[layoutModel.rows.length - 1].id, Infinity);
+    else if (sectionId === 'featured') { layoutModel.featured.splice(index, 1); renderLayoutEditor(); saveLayout(); }
+    else moveApp(sectionId, index, 'hidden', Infinity);
+  };
+  startDrag(el.querySelector('.le-grip'), el, sectionId, index);
+  return el;
+}
+
+function moveRow(index, dir) {
+  const rows = layoutModel.rows;
+  [rows[index], rows[index + dir]] = [rows[index + dir], rows[index]];
+  renderLayoutEditor();
+  saveLayout();
+}
+
+/**
+ * Applies a drop. Folders and "hidden" hold the apps themselves; the featured slots only point
+ * at apps that also live in a folder.
+ */
+function moveApp(from, fromIndex, to, toIndex) {
+  applyLayoutMove(layoutModel, from, fromIndex, to, toIndex);
+  renderLayoutEditor();
+  saveLayout();
+}
+
+function applyLayoutMove(model, from, fromIndex, to, toIndex) {
+  const listOf = (id) => (id === 'featured' ? model.featured : id === 'hidden' ? model.hidden : model.rows.find((r) => r.id === id)?.apps);
+  const source = listOf(from);
+  const app = source?.[fromIndex];
+  if (!app || !listOf(to)) return;
+  const lastRow = model.rows[model.rows.length - 1];
+
+  if (to === 'featured') {
+    const featured = model.featured;
+    if (from === 'featured') {
+      featured.splice(fromIndex, 1);
+      if (fromIndex < toIndex) toIndex--;
+    } else {
+      const existing = featured.findIndex((a) => a.pkg === app.pkg);
+      if (existing >= 0) { featured.splice(existing, 1); if (existing < toIndex) toIndex--; }
+      // Featuring a hidden app shows it again, in the last folder
+      if (from === 'hidden') { source.splice(fromIndex, 1); lastRow.apps.push(app); }
+    }
+    featured.splice(Math.min(toIndex, featured.length), 0, app);
+    if (featured.length > 3) featured.length = 3;
+    return;
+  }
+
+  if (from === 'featured') {
+    // Out of the featured slots: it stays in its folder, unless it was dropped on "hidden"
+    model.featured.splice(fromIndex, 1);
+    if (to === 'hidden') {
+      model.rows.forEach((r) => { r.apps = r.apps.filter((a) => a.pkg !== app.pkg); });
+      model.hidden.splice(Math.min(toIndex, model.hidden.length), 0, app);
+    }
+    return;
+  }
+
+  source.splice(fromIndex, 1);
+  if (from === to && fromIndex < toIndex) toIndex--;
+  const target = listOf(to);
+  target.splice(Math.min(toIndex, target.length), 0, app);
+  if (to === 'hidden') model.featured = model.featured.filter((a) => a.pkg !== app.pkg);
+}
+
+/** Drag by the handle: a floating copy follows the finger and a cyan line shows where it lands. */
+function startDrag(handle, item, sectionId, index) {
+  handle.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    handle.setPointerCapture(e.pointerId);
+    buzz(20);
+    const box = item.getBoundingClientRect();
+    const ghost = item.cloneNode(true);
+    ghost.classList.add('le-ghost');
+    Object.assign(ghost.style, { left: `${box.left}px`, top: `${box.top}px`, width: `${box.width}px` });
+    document.body.append(ghost);
+    item.classList.add('dragging');
+    const offsetY = e.clientY - box.top;
+    const marker = document.createElement('div');
+    marker.className = 'le-marker';
+    const sheet = $('sheet');
+    let drop = null;
+    let scrollTimer = null;
+
+    const locate = (x, y) => {
+      document.querySelectorAll('.le-list.target').forEach((l) => l.classList.remove('target'));
+      const under = document.elementFromPoint(x, y);
+      const list = under?.closest('.le-list');
+      if (!list) { marker.remove(); drop = null; return; }
+      list.classList.add('target');
+      const items = [...list.querySelectorAll('.le-item')];
+      let pos = items.length;
+      for (let i = 0; i < items.length; i++) {
+        const r = items[i].getBoundingClientRect();
+        if (y < r.top + r.height / 2) { pos = i; break; }
+      }
+      if (items[pos]) list.insertBefore(marker, items[pos]); else list.append(marker);
+      drop = { to: list.dataset.section, index: pos };
+    };
+
+    const onMove = (ev) => {
+      ghost.style.top = `${ev.clientY - offsetY}px`;
+      locate(ev.clientX, ev.clientY);
+      // Scroll the sheet when dragging near its edges
+      clearInterval(scrollTimer);
+      const r = sheet.getBoundingClientRect();
+      const edge = ev.clientY < r.top + 70 ? -1 : ev.clientY > r.bottom - 70 ? 1 : 0;
+      if (edge) scrollTimer = setInterval(() => { sheet.scrollTop += edge * 12; locate(ev.clientX, ev.clientY); }, 16);
+    };
+    const onUp = () => {
+      clearInterval(scrollTimer);
+      handle.removeEventListener('pointermove', onMove);
+      handle.removeEventListener('pointerup', onUp);
+      handle.removeEventListener('pointercancel', onUp);
+      ghost.remove();
+      marker.remove();
+      item.classList.remove('dragging');
+      document.querySelectorAll('.le-list.target').forEach((l) => l.classList.remove('target'));
+      if (drop && !(drop.to === sectionId && (drop.index === index || drop.index === index + 1))) {
+        buzz(15);
+        moveApp(sectionId, index, drop.to, drop.index);
+      }
+    };
+    handle.addEventListener('pointermove', onMove);
+    handle.addEventListener('pointerup', onUp);
+    handle.addEventListener('pointercancel', onUp);
+  });
+}
+
 // ---------- Install on TV (phone app only) ----------
 
 window.onNativeInstall = (status, message) => {

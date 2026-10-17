@@ -73,6 +73,7 @@ object Apps {
 
     fun setFavorites(context: Context, pkgs: List<String>) {
         prefs(context).edit().putString("favorites", JSONArray(pkgs.distinct()).toString()).apply()
+        HomePrefs.changed()
     }
 
     private fun prefs(context: Context) = context.getSharedPreferences("apps", Context.MODE_PRIVATE)

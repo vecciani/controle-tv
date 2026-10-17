@@ -220,6 +220,13 @@ class ControlServer(
                 ok()
             }
 
+            path == "/api/home/layout" && !post -> ok(HomePrefs.describe(context))
+
+            path == "/api/home/layout" && post -> {
+                HomePrefs.apply(context, body(session))
+                ok()
+            }
+
             path == "/api/players" -> {
                 val list = JSONArray()
                 PlayerActivity.installedPlayers(context).forEach { (pkg, label) ->

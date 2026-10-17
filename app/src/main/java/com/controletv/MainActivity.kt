@@ -94,9 +94,9 @@ class MainActivity : Activity() {
     private lateinit var updateButton: Button
 
     private var shownSignature = ""
-    private var shownFavorites = ""
     private var shownUrl: String? = null
     private var lastMinute = -1
+    private var shownChanges = -1
 
     private val unit by lazy { resources.displayMetrics.widthPixels / 100f } // 1% of screen width
 
@@ -276,27 +276,32 @@ class MainActivity : Activity() {
 
     private fun loadApps(force: Boolean) {
         loader.execute {
-            val apps = Apps.list(this)
+            val hidden = HomePrefs.hidden(this)
+            val apps = Apps.list(this).filter { it.pkg !in hidden }
             val favorites = Apps.favorites(this).filter { pkg -> apps.any { it.pkg == pkg } }
             val folders = apps.associate { it.pkg to Folders.folderOf(this, it.pkg, it.label) }
-            val signature = apps.joinToString { it.pkg + "=" + folders[it.pkg] } + "|" + favorites.joinToString()
+            val rowOrder = HomePrefs.rowOrder(this)
+            val sorted = rowOrder.associateWith { id -> HomePrefs.sortFolder(this, id, apps.filter { folders[it.pkg] == id }) }
+            val featured = HomePrefs.featured(this, apps.map { it.pkg })
+            val signature = rowOrder.joinToString { id -> id + ":" + sorted[id]!!.joinToString(",") { it.pkg } } +
+                "|" + featured.joinToString() + "|" + favorites.joinToString()
             runOnUiThread {
                 if (!force && signature == shownSignature) return@runOnUiThread
                 shownSignature = signature
-                shownFavorites = Apps.favorites(this).joinToString()
                 val focused = currentFocus?.tag as? String
                 rows.removeAllViews()
                 val byPkg = apps.associateBy { it.pkg }
                 featuredRow.removeAllViews()
                 val featuredWidth = (resources.displayMetrics.widthPixels - u(7f) - u(2.6f) * 2) / HomePrefs.FEATURED_SLOTS
-                HomePrefs.featured(this, apps.map { it.pkg }).mapNotNull { byPkg[it] }.forEach { app ->
+                featured.mapNotNull { byPkg[it] }.forEach { app ->
                     featuredRow.addView(appCard(app, app.pkg in favorites, Folders.ALL.firstOrNull { it.id == folders[app.pkg] }?.title ?: "Destaque", featuredWidth, "feat:"))
                 }
                 if (favorites.isNotEmpty()) {
                     rows.addView(row("★  Favoritos", favorites.mapNotNull { byPkg[it] }.map { appCard(it, true) }))
                 }
-                for (folder in Folders.ALL) {
-                    val inFolder = apps.filter { folders[it.pkg] == folder.id }
+                for (id in rowOrder) {
+                    val folder = Folders.ALL.first { it.id == id }
+                    val inFolder = sorted[id].orEmpty()
                     if (inFolder.isNotEmpty()) rows.addView(row(folder.title, inFolder.map { appCard(it, it.pkg in favorites, folder.title) }))
                 }
                 rows.addView(row("Configurações", settingsTiles()))
@@ -370,6 +375,9 @@ class MainActivity : Activity() {
         add("set:bt", "Controles e Bluetooth", R.drawable.ic_t_bluetooth, Intent(Settings.ACTION_BLUETOOTH_SETTINGS))
         add("set:apps", "Gerenciar apps", R.drawable.ic_t_apps, Intent(Settings.ACTION_MANAGE_APPLICATIONS_SETTINGS))
         packageManager.getLaunchIntentForPackage("com.amazon.venezia")?.let { add("set:store", "Loja de apps", R.drawable.ic_t_store, it) }
+        tiles += card("set:hidden", "Apps escondidos", "Apps tirados da tela inicial", false, { it.setImageResource(R.drawable.ic_t_apps) }, iconTile = true) {
+            hiddenApps()
+        }
         tiles += card("set:amazon", "Tela da Amazon", "Tela inicial original do Fire TV", false, { it.setImageResource(R.drawable.ic_t_amazon) }, iconTile = true) {
             HomeWatcher.openAmazonHome(this)
         }
@@ -462,6 +470,11 @@ class MainActivity : Activity() {
         }
         dialog.add("Destacar no topo…") { featurePicker(app) }
         dialog.add("Mover para pasta…") { folderPicker(app) }
+        dialog.add("Esconder da tela inicial") {
+            HomePrefs.setHidden(this, app.pkg, true)
+            toast("${app.label} escondido. Para ver de novo: Configurações → Apps escondidos")
+            loadApps(force = true)
+        }
         dialog.add("Informações do app") {
             runCatching {
                 startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${app.pkg}")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
@@ -471,6 +484,21 @@ class MainActivity : Activity() {
             dialog.add("Desinstalar") {
                 @Suppress("DEPRECATION")
                 startActivity(Intent(Intent.ACTION_UNINSTALL_PACKAGE, Uri.parse("package:${app.pkg}")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            }
+        }
+        dialog.show()
+    }
+
+    private fun hiddenApps() {
+        val hidden = HomePrefs.hidden(this)
+        val apps = Apps.list(this).filter { it.pkg in hidden }
+        if (apps.isEmpty()) return toast("Nenhum app escondido. Segure OK num app para esconder.")
+        val dialog = OptionsDialog("Apps escondidos")
+        apps.forEach { app ->
+            dialog.add("${app.label}   ·   mostrar de novo") {
+                HomePrefs.setHidden(this, app.pkg, false)
+                toast("${app.label} voltou para a tela inicial")
+                loadApps(force = true)
             }
         }
         dialog.show()
@@ -728,8 +756,11 @@ class MainActivity : Activity() {
         updateWifi()
         updateMusic()
 
-        // Favorites may have been changed from the phone
-        if (Apps.favorites(this).joinToString() != shownFavorites) loadApps(force = false)
+        // The layout may have been changed from the phone
+        if (HomePrefs.changes != shownChanges) {
+            shownChanges = HomePrefs.changes
+            loadApps(force = false)
+        }
     }
 
     private fun setChip(chip: TextView, dot: Int, label: String) {
