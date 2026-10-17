@@ -18,6 +18,7 @@ BASE="https://github.com/$REPO/releases/latest/download"
 OUT=build/release
 rm -rf "$OUT" && mkdir -p "$OUT"
 
+./scripts/baixar-libs.sh
 ./gradlew -q assembleDebug
 cp app/build/outputs/apk/debug/app-debug.apk "$OUT/controle-tv.apk"
 cp phone/build/outputs/apk/debug/phone-debug.apk "$OUT/controle-tv-celular.apk"

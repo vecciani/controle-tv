@@ -65,7 +65,7 @@ class ControlServer(
                     val language = body.getString("subtitleLanguage")
                     PlayerActivity.setSubtitleLanguage(context, language)
                     // Get the speech model ready ahead of the next video
-                    if (language == "auto") AutoCaptions.modelOrPrepare(context) {}
+                    if (language == "auto") AutoCaptions.recognizerOrPrepare(context) {}
                 }
                 ok()
             }

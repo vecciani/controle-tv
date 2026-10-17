@@ -610,7 +610,8 @@ function settingsSheet() {
       <button class="sheet-btn" id="s-pin">${icon('lock')}${s.requirePin ? 'Parar de pedir PIN' : 'Pedir PIN para novos celulares'}</button>
       <button class="sheet-btn primary" id="s-update">${icon('download')}Procurar atualização</button>
       <button class="sheet-btn danger" id="s-logout">${icon('logout')}Desconectar este celular</button>
-    </div>`);
+    </div>
+    <p class="hint small" style="margin-top:16px">${icon('info')}Legenda automática: modelo Kroko ASR (Banafo, licença CC-BY-SA) rodando com sherpa-onnx (Apache-2.0).</p>`);
   sheet.querySelector('#s-update-text').textContent = s.update || '–';
   sheet.querySelector('#s-device').textContent = s.device || '–';
   const lastPlay = sheet.querySelector('#s-last-play');
@@ -733,7 +734,7 @@ async function subtitlesSheet() {
     </div>
     <h4>Idioma padrão</h4>
     <div class="lang-row" id="s-langs"></div>
-    <p class="hint small">${icon('info')}A legenda nesse idioma liga sozinha quando o vídeo tiver uma. <b>Automática (CC)</b> escreve a legenda em inglês a partir do áudio do filme, sempre sincronizada (baixa 40 MB na primeira vez).</p>`);
+    <p class="hint small">${icon('info')}A legenda nesse idioma liga sozinha quando o vídeo tiver uma. <b>Automática (CC)</b> escreve a legenda em inglês a partir do áudio do filme, sempre sincronizada (baixa 55 MB na primeira vez).</p>`);
   sheetButton(sheet, 's-sub-file', () => $('sub-file').click());
 
   const current = state.status?.subtitleLanguage || 'en';

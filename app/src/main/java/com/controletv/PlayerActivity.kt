@@ -229,11 +229,11 @@ class PlayerActivity : Activity() {
         player?.let { p ->
             p.trackSelectionParameters = p.trackSelectionParameters.buildUpon().setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true).build()
         }
-        val model = AutoCaptions.modelOrPrepare(this) {
+        val model = AutoCaptions.recognizerOrPrepare(this) {
             runOnUiThread { if (autoActive && !isDestroyed) restartAt(player?.currentPosition ?: 0) }
         }
         if (model == null) {
-            toast(if (AutoCaptions.status == AutoCaptions.Status.DOWNLOADING) "Baixando a legenda automática (40 MB, só na primeira vez)…" else "Preparando a legenda automática…")
+            toast(if (AutoCaptions.status == AutoCaptions.Status.DOWNLOADING) "Baixando a legenda automática (55 MB, só na primeira vez)…" else "Preparando a legenda automática…")
         } else if (engine == null) {
             restartAt(player?.currentPosition ?: 0)
         }
@@ -289,7 +289,7 @@ class PlayerActivity : Activity() {
         player?.release()
         engine?.close()
         engine = null
-        val model = if (autoActive) AutoCaptions.modelOrPrepare(this) {} else null
+        val model = if (autoActive) AutoCaptions.recognizerOrPrepare(this) {} else null
         val renderers = if (model == null) DefaultRenderersFactory(this) else {
             val tap = CaptionEngine(model) { text, final ->
                 runOnUiThread {

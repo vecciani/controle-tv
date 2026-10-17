@@ -34,6 +34,9 @@ android {
 
     buildFeatures { buildConfig = true }
 
+    // Compress the speech-recognition libraries: a much smaller download for updates
+    packaging { jniLibs { useLegacyPackaging = true } }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -49,6 +52,7 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer-hls:1.4.1")
     implementation("androidx.media3:media3-exoplayer-dash:1.4.1")
     implementation("androidx.media3:media3-ui:1.4.1")
-    implementation("com.alphacephei:vosk-android:0.3.75")
+    // Speech recognition for automatic subtitles (downloaded by scripts/baixar-libs.sh)
+    implementation(files("libs/sherpa-onnx-1.13.8.aar"))
     testImplementation("junit:junit:4.13.2")
 }
