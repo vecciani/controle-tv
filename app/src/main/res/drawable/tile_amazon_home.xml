@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 16:9 tile with the Lucide "house" icon -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="320dp" android:height="180dp"
+    android:viewportWidth="320" android:viewportHeight="180">
+    <path android:fillColor="#161626" android:pathData="M0,0h320v180h-320z" />
+    <group android:scaleX="3.2" android:scaleY="3.2" android:translateX="121.6" android:translateY="51.6">
+        <path
+            android:pathData="M15,21v-8a1,1 0,0 0,-1 -1h-4a1,1 0,0 0,-1 1v8 M3,10a2,2 0,0 1,0.709 -1.528l7,-5.999a2,2 0,0 1,2.582 0l7,5.999A2,2 0,0 1,21 10v9a2,2 0,0 1,-2 2H5a2,2 0,0 1,-2 -2z"
+            android:strokeWidth="2" android:strokeColor="#A855F7"
+            android:strokeLineCap="round" android:strokeLineJoin="round" />
+    </group>
+</vector>

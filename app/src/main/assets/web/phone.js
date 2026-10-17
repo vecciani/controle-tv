@@ -672,6 +672,7 @@ function settingsSheet() {
       ${s.adb !== 'ok' ? `<button class="sheet-btn primary" id="s-retry">${icon('refresh')}Tentar conectar de novo</button>
       <button class="sheet-btn" id="s-probe">${icon('search')}Diagnóstico detalhado</button>` : ''}
       ${s.updatePending ? `<button class="sheet-btn primary" id="s-install">${icon('download')}Instalar atualização baixada</button>` : ''}
+      <button class="sheet-btn${s.homeLauncher ? ' primary' : ''}" id="s-home">${icon('house')}${s.homeLauncher ? 'Controle TV é a tela inicial (desligar)' : 'Usar o Controle TV como tela inicial'}</button>
       <button class="sheet-btn" id="s-player">${icon('play')}Player da TV</button>
       <button class="sheet-btn" id="s-pin">${icon('lock')}${s.requirePin ? 'Parar de pedir PIN' : 'Pedir PIN para novos celulares'}</button>
       <button class="sheet-btn primary" id="s-update">${icon('download')}Procurar atualização</button>
@@ -698,6 +699,21 @@ function settingsSheet() {
   });
   sheetButton(sheet, 's-probe', probeSheet);
   sheetButton(sheet, 's-player', playerSheet);
+  sheetButton(sheet, 's-home', async () => {
+    const enable = !s.homeLauncher;
+    toast(enable ? 'Ativando…' : 'Desativando…');
+    try {
+      await api('/api/settings', { homeLauncher: enable });
+      // The service takes a moment to start or stop
+      setTimeout(async () => {
+        await refreshStatus();
+        toast(enable
+          ? (state.status?.homeLauncher ? 'Pronto: o Home do controle agora abre o Controle TV' : 'A TV não ativou. Veja se o controle completo (ADB) está ativo.')
+          : 'Desligado: o Home volta a abrir a tela da Amazon');
+        settingsSheet();
+      }, 1500);
+    } catch (e) { toast(e.message, true); }
+  });
   sheetButton(sheet, 's-pin', async () => {
     try {
       await api('/api/settings', { requirePin: !s.requirePin });

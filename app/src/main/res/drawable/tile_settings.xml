@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 16:9 tile with the Lucide "settings-2" icon -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="320dp" android:height="180dp"
+    android:viewportWidth="320" android:viewportHeight="180">
+    <path android:fillColor="#161626" android:pathData="M0,0h320v180h-320z" />
+    <group android:scaleX="3.2" android:scaleY="3.2" android:translateX="121.6" android:translateY="51.6">
+        <path
+            android:pathData="M20,7h-9 M14,17H5 M20,17a3,3 0,1 1,-6 0a3,3 0,1 1,6 0z M10,7a3,3 0,1 1,-6 0a3,3 0,1 1,6 0z"
+            android:strokeWidth="2" android:strokeColor="#22D3EE"
+            android:strokeLineCap="round" android:strokeLineJoin="round" />
+    </group>
+</vector>

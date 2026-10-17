@@ -240,6 +240,7 @@ class MainActivity : Activity() {
                 val byPkg = apps.associateBy { it.pkg }
                 if (favorites.isNotEmpty()) rows.addView(row("Favoritos", favorites.mapNotNull { byPkg[it] }, favorites))
                 rows.addView(row("Todos os apps", apps, favorites))
+                rows.addView(row("Sistema", systemTiles()))
                 // Keep the focus where it was, or start on the first app
                 val target = focused?.let { rows.findViewWithTag<View>(it) } ?: firstCard()
                 target?.requestFocus()
@@ -253,7 +254,20 @@ class MainActivity : Activity() {
         return strip.getChildAt(0)
     }
 
-    private fun row(title: String, apps: List<AppInfo>, favorites: List<String>): View {
+    private fun row(title: String, apps: List<AppInfo>, favorites: List<String>): View =
+        row(title, apps.map { app -> appCard(app, app.pkg in favorites) })
+
+    /** Shortcuts to Fire TV's own screens, so making us the home never locks anything away. */
+    private fun systemTiles(): List<View> = listOf(
+        card("system:settings", "Configurações da TV", false, { it.setImageResource(R.drawable.tile_settings) }) {
+            startActivity(Intent(android.provider.Settings.ACTION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        },
+        card("system:amazon", "Tela da Amazon", false, { it.setImageResource(R.drawable.tile_amazon_home) }) {
+            HomeWatcher.openAmazonHome(this)
+        },
+    )
+
+    private fun row(title: String, cards: List<View>): View {
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             clipChildren = false
@@ -270,7 +284,7 @@ class MainActivity : Activity() {
             // Room for the focused card to grow without being cut
             setPadding(u(1.5f), u(1.6f), u(1.5f), u(1.6f))
         }
-        apps.forEach { strip.addView(card(it, it.pkg in favorites)) }
+        cards.forEach { strip.addView(it) }
         val scroll = HorizontalScrollView(this).apply {
             isHorizontalScrollBarEnabled = false
             clipChildren = false
@@ -284,14 +298,33 @@ class MainActivity : Activity() {
         return row
     }
 
-    private fun card(app: AppInfo, favorite: Boolean): View {
+    private fun appCard(app: AppInfo, favorite: Boolean): View =
+        card(app.pkg, app.label, favorite, { loadIcon(app.pkg, it) }, onLongClick = {
+            val favorites = Apps.favorites(this)
+            if (app.pkg in favorites) {
+                Apps.setFavorites(this, favorites - app.pkg)
+                toast("${app.label} saiu dos favoritos")
+            } else {
+                Apps.setFavorites(this, favorites + app.pkg)
+                toast("${app.label} fixado nos favoritos")
+            }
+            loadApps(force = true)
+        }) {
+            toast("Abrindo ${app.label}")
+            Apps.launch(this, app.pkg)
+        }
+
+    private fun card(
+        key: String, title: String, favorite: Boolean, bindImage: (ImageView) -> Unit,
+        onLongClick: (() -> Unit)? = null, onClick: () -> Unit,
+    ): View {
         val w = u(15f)
         val h = w * 9 / 16
         val box = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             isFocusable = true
             isFocusableInTouchMode = true
-            tag = app.pkg
+            tag = key
             clipChildren = false
         }
         val art = FrameLayout(this).apply {
@@ -314,7 +347,7 @@ class MainActivity : Activity() {
         }
         art.addView(ring, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
         val label = text(1.1f, TEXT).apply {
-            text = app.label
+            text = title
             maxLines = 1
             ellipsize = android.text.TextUtils.TruncateAt.END
             alpha = 0f
@@ -324,7 +357,7 @@ class MainActivity : Activity() {
         box.addView(label, LinearLayout.LayoutParams(w, WRAP_CONTENT))
         box.layoutParams = LinearLayout.LayoutParams(w, WRAP_CONTENT).apply { rightMargin = u(1.4f) }
 
-        loadIcon(app.pkg, image)
+        bindImage(image)
 
         box.setOnFocusChangeListener { _, focused ->
             ring.visibility = if (focused) View.VISIBLE else View.INVISIBLE
@@ -341,22 +374,8 @@ class MainActivity : Activity() {
             }
             art.elevation = if (focused) u(1f).toFloat() else 0f
         }
-        box.setOnClickListener {
-            toast("Abrindo ${app.label}")
-            Apps.launch(this, app.pkg)
-        }
-        box.setOnLongClickListener {
-            val favorites = Apps.favorites(this)
-            if (app.pkg in favorites) {
-                Apps.setFavorites(this, favorites - app.pkg)
-                toast("${app.label} saiu dos favoritos")
-            } else {
-                Apps.setFavorites(this, favorites + app.pkg)
-                toast("${app.label} fixado nos favoritos")
-            }
-            loadApps(force = true)
-            true
-        }
+        box.setOnClickListener { onClick() }
+        if (onLongClick != null) box.setOnLongClickListener { onLongClick(); true }
         return box
     }
 

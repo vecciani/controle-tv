@@ -57,6 +57,7 @@ class ControlServer(
             path == "/api/settings" && post -> {
                 val body = body(session)
                 if (body.has("requirePin")) pairing.requirePin = body.getBoolean("requirePin")
+                if (body.has("homeLauncher")) HomeWatcher.setEnabled(body.getBoolean("homeLauncher"))
                 if (body.has("player")) PlayerActivity.setPreferred(context, body.optString("player").ifEmpty { null })
                 if (body.has("subtitleLanguage")) {
                     val language = body.getString("subtitleLanguage")
@@ -285,6 +286,7 @@ class ControlServer(
             .put("updatePending", Updater.pending != null)
             .put("adbError", Adb.lastError)
             .put("lastPlay", PlayerActivity.lastPlay)
+            .put("homeLauncher", HomeWatcher.running)
             .put("airReceived", AirMouseReceiver.received)
             .put("airRejected", AirMouseReceiver.rejected)
             .put("pointerProblem", MouseCursor.problem)
