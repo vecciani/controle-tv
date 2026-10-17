@@ -5,8 +5,17 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.graphics.Color
+import android.os.Handler
+import android.os.Looper
+import android.util.TypedValue
+import android.view.Gravity
 import android.view.KeyEvent
+import android.view.ViewGroup.LayoutParams.MATCH_PARENT
+import android.view.ViewGroup.LayoutParams.WRAP_CONTENT
 import android.view.WindowManager
+import android.widget.FrameLayout
+import android.widget.TextView
 import android.widget.Toast
 import androidx.annotation.OptIn
 import androidx.media3.common.C
@@ -17,6 +26,12 @@ import androidx.media3.common.Player
 import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.Tracks
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.exoplayer.DefaultRenderersFactory
+import androidx.media3.exoplayer.audio.AudioCapabilities
+import androidx.media3.exoplayer.audio.AudioSink
+import androidx.media3.exoplayer.audio.DefaultAudioSink
+import androidx.media3.exoplayer.audio.TeeAudioProcessor
+import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
@@ -39,8 +54,9 @@ import java.util.concurrent.TimeUnit
  * can't handle it, the link is handed to another player installed on the TV (VLC, MX…).
  * Media keys from the remote or the phone control it: play/pause, and rewind/forward seek 10 s.
  *
- * Subtitles: every one the video app sent is loaded (fixed to UTF-8), Portuguese is turned on
- * automatically, and the phone can switch tracks or load an .srt while the video plays.
+ * Subtitles: files (sent by the video app or loaded from the phone) are drawn by us on top of
+ * the video, so they can be shifted in time from the phone to fix bad sync. Subtitles inside the
+ * stream itself are drawn by the player. The chosen language turns on by itself.
  */
 @OptIn(UnstableApi::class)
 class PlayerActivity : Activity() {
@@ -52,13 +68,31 @@ class PlayerActivity : Activity() {
         val subtitleNames: List<String>, val position: Long, val headers: Map<String, String>,
     )
 
-    private class Sub(val file: File, val label: String, val language: String?, val manual: Boolean = false)
+    private class Sub(val label: String, val language: String?, val captions: List<Caption>)
 
-    // What is playing now, so a subtitle added from the phone can restart it in place
     private var current: Request? = null
     private var currentUrl: String? = null
     private var currentMime: String? = null
+
+    // Automatic subtitles (speech recognition on the movie's audio)
+    private var autoActive = false
+    private var engine: CaptionEngine? = null
+    private var autoPartial = ""
+    private var autoFinal = ""
+    private var autoFinalAt = 0L
+
+    // Subtitle files we draw ourselves, which one is on (-1 = none) and how far it's shifted
     private val subtitleFiles = mutableListOf<Sub>()
+    private var activeSub = -1
+    private var offsetMs = 0L
+    private lateinit var captionView: TextView
+    private val ticker = Handler(Looper.getMainLooper())
+    private val tick = object : Runnable {
+        override fun run() {
+            drawCaption()
+            ticker.postDelayed(this, 80)
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -76,8 +110,62 @@ class PlayerActivity : Activity() {
             )
             subtitleView?.setFractionalTextSize(0.06f)
         }
-        setContentView(view)
+        captionView = TextView(this).apply {
+            setTextColor(Color.WHITE)
+            setTextSize(TypedValue.COMPLEX_UNIT_PX, resources.displayMetrics.heightPixels * 0.055f)
+            setShadowLayer(6f, 0f, 0f, Color.BLACK)
+            setBackgroundColor(0x99000000.toInt())
+            gravity = Gravity.CENTER
+            setPadding(24, 6, 24, 8)
+            visibility = android.view.View.GONE
+        }
+        val root = FrameLayout(this).apply {
+            addView(view, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+            addView(
+                captionView,
+                FrameLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL)
+                    .apply { bottomMargin = (resources.displayMetrics.heightPixels * 0.08f).toInt() }
+            )
+        }
+        setContentView(root)
+        ticker.post(tick)
         handle(intent)
+    }
+
+    /** Shows the caption for the current moment, shifted by [offsetMs] (positive = later). */
+    private fun drawCaption() {
+        if (autoActive) return drawAutoCaption()
+        val p = player
+        val sub = subtitleFiles.getOrNull(activeSub)
+        if (p == null || sub == null) {
+            captionView.visibility = android.view.View.GONE
+            return
+        }
+        val at = p.currentPosition - offsetMs
+        val captions = sub.captions
+        // Binary search for the last caption starting at or before "at"
+        var lo = 0
+        var hi = captions.size - 1
+        var found = -1
+        while (lo <= hi) {
+            val mid = (lo + hi) / 2
+            if (captions[mid].start <= at) { found = mid; lo = mid + 1 } else hi = mid - 1
+        }
+        // Overlapping captions: show every one still on screen
+        val text = buildString {
+            var i = found
+            while (i >= 0 && i > found - 4) {
+                val c = captions[i]
+                if (at < c.end) { if (isNotEmpty()) insert(0, "\n"); insert(0, c.text) }
+                i--
+            }
+        }
+        if (text.isEmpty()) {
+            captionView.visibility = android.view.View.GONE
+        } else {
+            if (captionView.text != text) captionView.text = text
+            captionView.visibility = android.view.View.VISIBLE
+        }
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -109,20 +197,73 @@ class PlayerActivity : Activity() {
                 } else {
                     subtitleFiles.clear()
                     subtitleFiles += subs
+                    offsetMs = 0
+                    val wantsAuto = subtitleLanguage(this) == "auto"
+                    activeSub = if (wantsAuto) -1 else defaultSubtitle()
+                    autoActive = false
                     start(request, probe.finalUrl, probe.kind.mime ?: mimeFromHints(request))
+                    if (wantsAuto) enableAuto()
                 }
             }
         }.start()
     }
 
-    /** Downloads (or reads) every subtitle the video app sent, as clean UTF-8 files. */
+    /** Words being recognized now, or the last sentence for a few seconds after it ends. */
+    private fun drawAutoCaption() {
+        val recent = if (System.currentTimeMillis() - autoFinalAt < 3_500) autoFinal else ""
+        var text = autoPartial.ifBlank { recent }
+        // Keep it to about two lines: the most recent words
+        if (text.length > 84) text = "…" + text.takeLast(84).substringAfter(' ')
+        if (text.isBlank()) {
+            captionView.visibility = android.view.View.GONE
+        } else {
+            if (captionView.text != text) captionView.text = text
+            captionView.visibility = android.view.View.VISIBLE
+        }
+    }
+
+    /** Turns automatic subtitles on for this video, downloading/loading the model if needed. */
+    private fun enableAuto() {
+        autoActive = true
+        activeSub = -1
+        player?.let { p ->
+            p.trackSelectionParameters = p.trackSelectionParameters.buildUpon().setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true).build()
+        }
+        val model = AutoCaptions.modelOrPrepare(this) {
+            runOnUiThread { if (autoActive && !isDestroyed) restartAt(player?.currentPosition ?: 0) }
+        }
+        if (model == null) {
+            toast(if (AutoCaptions.status == AutoCaptions.Status.DOWNLOADING) "Baixando a legenda automática (40 MB, só na primeira vez)…" else "Preparando a legenda automática…")
+        } else if (engine == null) {
+            restartAt(player?.currentPosition ?: 0)
+        }
+    }
+
+    private fun disableAuto() {
+        if (!autoActive) return
+        autoActive = false
+        autoPartial = ""
+        autoFinal = ""
+        if (engine != null) restartAt(player?.currentPosition ?: 0)
+    }
+
+    /** Rebuilds the player at the same spot (needed to attach or detach the audio tap). */
+    private fun restartAt(position: Long) {
+        val request = current ?: return
+        val url = currentUrl ?: return
+        start(request, url, currentMime, retriedAsHls = true, position = position)
+    }
+
+    /** Downloads (or reads) every subtitle the video app sent and parses it. */
     private fun loadSubtitles(request: Request): List<Sub> =
         request.subtitles.mapIndexedNotNull { i, sub ->
             try {
                 val file = if (sub.startsWith("http")) Subtitles.download(this, sub, request.headers) else File(Uri.parse(sub).path!!)
+                val captions = SubtitleParser.parse(file.readText())
+                if (captions.isEmpty()) return@mapIndexedNotNull null
                 val name = request.subtitleNames.getOrNull(i).orEmpty()
                 val language = Subtitles.languageOf("$name $sub")
-                Sub(file, name.ifEmpty { Subtitles.labelFor(language, i) }, language)
+                Sub(name.ifEmpty { Subtitles.labelFor(language, i) }, language, captions)
             } catch (e: Exception) {
                 null
             }
@@ -143,30 +284,41 @@ class PlayerActivity : Activity() {
         val item = MediaItem.Builder()
             .setUri(url)
             .apply { mime?.let { setMimeType(it) } }
-            .setSubtitleConfigurations(
-                subtitleFiles.map { sub ->
-                    MediaItem.SubtitleConfiguration.Builder(Uri.fromFile(sub.file))
-                        .setMimeType(Subtitles.mimeOf(sub.file))
-                        .setLabel(sub.label)
-                        .setLanguage(sub.language)
-                        .setSelectionFlags(if (sub === defaultSubtitle()) C.SELECTION_FLAG_DEFAULT else 0)
-                        .build()
-                }
-            )
             .build()
 
         player?.release()
-        player = ExoPlayer.Builder(this)
-            .setMediaSourceFactory(DefaultMediaSourceFactory(http))
+        engine?.close()
+        engine = null
+        val model = if (autoActive) AutoCaptions.modelOrPrepare(this) {} else null
+        val renderers = if (model == null) DefaultRenderersFactory(this) else {
+            val tap = CaptionEngine(model) { text, final ->
+                runOnUiThread {
+                    if (final) { autoFinal = text; autoFinalAt = System.currentTimeMillis(); autoPartial = "" }
+                    else autoPartial = text
+                }
+            }
+            engine = tap
+            // Decode to plain stereo PCM (no passthrough to the TV) so we can listen to it
+            object : DefaultRenderersFactory(this) {
+                override fun buildAudioSink(context: Context, enableFloatOutput: Boolean, enableAudioTrackPlaybackParams: Boolean): AudioSink =
+                    DefaultAudioSink.Builder(context)
+                        .setAudioCapabilities(AudioCapabilities.DEFAULT_AUDIO_CAPABILITIES)
+                        .setAudioProcessors(arrayOf(TeeAudioProcessor(tap)))
+                        .build()
+            }
+        }
+        player = ExoPlayer.Builder(this, renderers)
+            .setMediaSourceFactory(DefaultMediaSourceFactory(DefaultDataSource.Factory(this, http)))
             .setSeekBackIncrementMs(10_000)
             .setSeekForwardIncrementMs(10_000)
             .build()
             .also { p ->
                 view.player = p
-                // Subtitles turn on by themselves in the chosen language, including ones inside the stream
+                // Subtitles inside the stream turn on by themselves in the chosen language,
+                // unless one of our subtitle files is already showing
                 val language = subtitleLanguage(this)
                 p.trackSelectionParameters = p.trackSelectionParameters.buildUpon()
-                    .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, language == "off")
+                    .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, language == "off" || activeSub >= 0 || autoActive)
                     .setPreferredTextLanguages(*Subtitles.codesFor(language))
                     .setSelectUndeterminedTextLanguage(true)
                     .build()
@@ -286,13 +438,18 @@ class PlayerActivity : Activity() {
     private fun stateJson(): JSONObject {
         val p = player
         val tracks = JSONArray()
-        val textOff = p?.trackSelectionParameters?.disabledTrackTypes?.contains(C.TRACK_TYPE_TEXT) == true
+        tracks.put(JSONObject().put("id", "auto").put("label", "Automática (CC, inglês)").put("selected", autoActive).put("sync", false))
+        subtitleFiles.forEachIndexed { i, sub ->
+            tracks.put(JSONObject().put("id", "e$i").put("label", sub.label).put("selected", activeSub == i).put("sync", true))
+        }
+        val streamOff = p?.trackSelectionParameters?.disabledTrackTypes?.contains(C.TRACK_TYPE_TEXT) == true
         textTracks().forEachIndexed { i, (group, index) ->
             val format = group.getTrackFormat(index)
             tracks.put(
-                JSONObject().put("id", i)
-                    .put("label", format.label ?: format.language?.let { "Legenda ($it)" } ?: "Legenda ${i + 1}")
-                    .put("selected", !textOff && group.isTrackSelected(index))
+                JSONObject().put("id", "i$i")
+                    .put("label", (format.label ?: format.language?.let { Subtitles.labelFor(Subtitles.languageOf(it), i) } ?: "Legenda ${i + 1}") + " (do vídeo)")
+                    .put("selected", !autoActive && activeSub < 0 && !streamOff && group.isTrackSelected(index))
+                    .put("sync", false)
             )
         }
         return JSONObject()
@@ -301,33 +458,57 @@ class PlayerActivity : Activity() {
             .put("position", p?.currentPosition ?: 0)
             .put("duration", p?.duration?.takeIf { it > 0 } ?: 0)
             .put("subtitles", tracks)
+            .put("offsetMs", offsetMs)
+            .put("canSync", activeSub >= 0 && !autoActive)
+            .put("autoCc", AutoCaptions.json())
     }
 
-    private fun selectText(id: Int) {
+    /** "e<n>" = one of our subtitle files, "i<n>" = a subtitle inside the stream, "off" = none. */
+    private fun selectText(id: String) {
         val p = player ?: return
+        if (id == "auto") return enableAuto()
+        disableAuto()
         val builder = p.trackSelectionParameters.buildUpon()
-        if (id < 0) {
-            builder.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
-        } else {
-            val (group, index) = textTracks().getOrNull(id) ?: return
-            builder.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
-                .setOverrideForType(TrackSelectionOverride(group.mediaTrackGroup, index))
+        when {
+            id.startsWith("e") -> {
+                activeSub = id.drop(1).toIntOrNull()?.takeIf { it in subtitleFiles.indices } ?: return
+                builder.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+            }
+            id.startsWith("i") -> {
+                val (group, index) = textTracks().getOrNull(id.drop(1).toIntOrNull() ?: -1) ?: return
+                activeSub = -1
+                builder.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+                    .setOverrideForType(TrackSelectionOverride(group.mediaTrackGroup, index))
+            }
+            else -> {
+                activeSub = -1
+                builder.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+            }
         }
         p.trackSelectionParameters = builder.build()
+        drawCaption()
     }
 
-    /** The external subtitle shown by default: one in the chosen language, else the first one. */
-    private fun defaultSubtitle(): Sub? {
+    /** The subtitle file shown by default: one in the chosen language, else the first one. */
+    private fun defaultSubtitle(): Int {
         val language = subtitleLanguage(this)
-        if (language == "off") return null
-        return subtitleFiles.lastOrNull { it.manual } ?: subtitleFiles.firstOrNull { it.language == language } ?: subtitleFiles.firstOrNull()
+        if (language == "off" || subtitleFiles.isEmpty()) return -1
+        return subtitleFiles.indexOfFirst { it.language == language }.takeIf { it >= 0 } ?: 0
     }
 
-    private fun addSubtitle(file: File, label: String) {
-        val request = current ?: return
-        // A subtitle loaded by hand is the one the user wants: make it the default
-        subtitleFiles += Sub(file, label, Subtitles.languageOf(label), manual = true)
-        start(request, currentUrl ?: request.url, currentMime, retriedAsHls = true, position = player?.currentPosition ?: 0)
+    /** A subtitle loaded from the phone goes on right away, with no reload of the video. */
+    private fun addSubtitle(file: File, label: String): Boolean {
+        val captions = SubtitleParser.parse(file.readText())
+        if (captions.isEmpty()) return false
+        subtitleFiles += Sub(label, Subtitles.languageOf(label), captions)
+        offsetMs = 0
+        selectText("e${subtitleFiles.lastIndex}")
+        return true
+    }
+
+    private fun shift(deltaMs: Long?, reset: Boolean) {
+        offsetMs = if (reset) 0 else (offsetMs + (deltaMs ?: 0)).coerceIn(-600_000, 600_000)
+        drawCaption()
     }
 
     // ---------- Keys ----------
@@ -356,6 +537,8 @@ class PlayerActivity : Activity() {
     }
 
     override fun onDestroy() {
+        ticker.removeCallbacksAndMessages(null)
+        engine?.close()
         player?.release()
         player = null
         super.onDestroy()
@@ -414,7 +597,7 @@ class PlayerActivity : Activity() {
             return result
         }
 
-        /** "en" (default), "pt", "es" or "off". */
+        /** "en" (default), "pt", "es", "auto" (automatic subtitles) or "off". */
         fun subtitleLanguage(context: Context): String =
             context.getSharedPreferences("player", Context.MODE_PRIVATE).getString("subtitleLanguage", "en")!!
 
@@ -424,9 +607,12 @@ class PlayerActivity : Activity() {
 
         fun state(): JSONObject? = onPlayer { stateJson() }
 
-        fun selectSubtitle(id: Int) = onPlayer { selectText(id) } != null
+        fun selectSubtitle(id: String) = onPlayer { selectText(id) } != null
 
-        fun addSubtitle(file: File, label: String) = onPlayer { addSubtitle(file, label) } != null
+        /** Null when nothing is playing, false when the file had no readable captions. */
+        fun addSubtitle(file: File, label: String): Boolean? = onPlayer { addSubtitle(file, label) }
+
+        fun shiftSubtitle(deltaMs: Long?, reset: Boolean) = onPlayer { shift(deltaMs, reset) } != null
 
         fun open(
             context: Context, url: String, title: String?, type: String?,

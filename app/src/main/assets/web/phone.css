@@ -298,7 +298,11 @@ main { padding: 4px 16px calc(96px + env(safe-area-inset-bottom)); }
 .cast-tip .round { width: 32px; height: 32px; }
 .cast-tip .round svg { width: 16px; height: 16px; }
 .subs-btn { width: 100%; margin-top: 12px; }
-.lang-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 14px; }
+.lang-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-bottom: 14px; }
 .lang-row button { padding: 10px 4px; border-radius: 12px; background: var(--surface); border: 1px solid var(--line); font-size: 13px; color: var(--muted); }
 .lang-row button.on { color: var(--cyan); border-color: rgba(34, 211, 238, .5); background: rgba(34, 211, 238, .08); }
 .sheet h4 { margin: 16px 0 8px; font-size: 13px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.sync-row { display: grid; grid-template-columns: 1fr 1fr 1.3fr 1fr 1fr; gap: 6px; align-items: center; margin-bottom: 8px; }
+.sync-row button { padding: 12px 0; border-radius: 12px; background: var(--surface); border: 1px solid var(--line); font-size: 14px; }
+.sync-row button:active { background: rgba(34, 211, 238, .12); }
+.sync-row strong { text-align: center; font-size: 16px; color: var(--cyan); font-variant-numeric: tabular-nums; }

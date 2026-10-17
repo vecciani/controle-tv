@@ -699,20 +699,41 @@ $('status-pill').addEventListener('click', settingsSheet);
 
 // ---------- Subtitles ----------
 
-const LANGS = [['en', 'Inglês'], ['pt', 'Português'], ['es', 'Espanhol'], ['off', 'Desligada']];
+const LANGS = [['en', 'Inglês'], ['auto', 'Automática (CC)'], ['pt', 'Português'], ['es', 'Espanhol'], ['off', 'Desligada']];
+
+const AUTO_STATUS = {
+  downloading: (p) => `baixando modelo ${p}%`,
+  loading: () => 'carregando…',
+  failed: () => 'falhou',
+};
+
+let subsRefresh = null;
 
 $('subs-btn').addEventListener('click', subtitlesSheet);
 
 async function subtitlesSheet() {
+  clearTimeout(subsRefresh);
   const sheet = openSheet(`
     <div class="sheet-head"><div><h3>Legendas</h3><p id="s-sub-title">Carregando…</p></div></div>
     <div class="sheet-actions" id="s-tracks"></div>
+    <div id="s-sync" hidden>
+      <h4>Sincronia</h4>
+      <div class="sync-row">
+        <button data-delta="-1000">−1 s</button>
+        <button data-delta="-250">−0,25</button>
+        <strong id="s-offset">0,00 s</strong>
+        <button data-delta="250">+0,25</button>
+        <button data-delta="1000">+1 s</button>
+      </div>
+      <p class="hint small">${icon('info')}Legenda <b>antes</b> da fala: toque em <b>+</b>. Legenda <b>depois</b> da fala: toque em <b>−</b>.</p>
+      <button class="link" id="s-sync-reset">${icon('refresh')}<span>Zerar ajuste</span></button>
+    </div>
     <div class="sheet-actions" style="margin-top:8px">
       <button class="sheet-btn primary" id="s-sub-file">${icon('download')}Carregar legenda do celular (.srt)</button>
     </div>
     <h4>Idioma padrão</h4>
     <div class="lang-row" id="s-langs"></div>
-    <p class="hint small">${icon('info')}A legenda nesse idioma liga sozinha quando o vídeo tiver uma.</p>`);
+    <p class="hint small">${icon('info')}A legenda nesse idioma liga sozinha quando o vídeo tiver uma. <b>Automática (CC)</b> escreve a legenda em inglês a partir do áudio do filme, sempre sincronizada (baixa 40 MB na primeira vez).</p>`);
   sheetButton(sheet, 's-sub-file', () => $('sub-file').click());
 
   const current = state.status?.subtitleLanguage || 'en';
@@ -740,31 +761,66 @@ async function subtitlesSheet() {
     }
     sheet.querySelector('#s-sub-title').textContent = player.title || 'Vídeo na TV';
     const anyOn = player.subtitles.some((t) => t.selected);
-    const options = [...player.subtitles, { id: -1, label: 'Sem legenda', selected: !anyOn }];
-    if (!player.subtitles.length) {
-      const empty = document.createElement('p');
-      empty.className = 'hint';
-      empty.textContent = 'Este vídeo chegou sem legendas. Carregue um arquivo .srt do celular.';
-      tracksBox.append(empty);
-      return;
+    const options = [...player.subtitles, { id: 'off', label: 'Sem legenda', selected: !anyOn }];
+    setupSync(sheet, player);
+    // While the speech model downloads or loads, keep the progress fresh
+    if (['downloading', 'loading'].includes(player.autoCc?.status)) {
+      subsRefresh = setTimeout(() => { if (!$('sheet').hidden && sheet.querySelector('#s-tracks')) subtitlesSheet(); }, 2000);
     }
+    const auto = player.autoCc || {};
     tracksBox.replaceChildren(...options.map((t) => {
       const btn = document.createElement('button');
       btn.className = 'sheet-btn' + (t.selected ? ' primary' : '');
-      btn.innerHTML = t.selected ? icon('check') : icon(t.id < 0 ? 'x' : 'captions');
-      btn.append(t.label);
+      btn.innerHTML = t.selected ? icon('check') : icon(t.id === 'off' ? 'x' : t.id === 'auto' ? 'zap' : 'captions');
+      const status = t.id === 'auto' && AUTO_STATUS[auto.status] ? ` · ${AUTO_STATUS[auto.status](auto.progress)}` : '';
+      btn.append(t.label + status);
       btn.onclick = async () => {
         try {
           await api('/api/player/subtitle', { id: t.id });
-          toast(t.id < 0 ? 'Legenda desligada' : `Legenda: ${t.label}`);
+          toast(t.id === 'off' ? 'Legenda desligada' : `Legenda: ${t.label}`);
           subtitlesSheet();
         } catch (e) { toast(e.message, true); }
       };
       return btn;
     }));
+    if (!player.subtitles.some((t) => t.id !== 'auto')) {
+      const empty = document.createElement('p');
+      empty.className = 'hint';
+      empty.textContent = 'Este vídeo chegou sem legendas. Use a Automática (CC) ou carregue um .srt do celular.';
+      tracksBox.prepend(empty);
+    }
   } catch (e) {
     sheet.querySelector('#s-sub-title').textContent = e.message;
   }
+}
+
+const formatOffset = (ms) => `${ms > 0 ? '+' : ms < 0 ? '−' : ''}${(Math.abs(ms) / 1000).toFixed(2).replace('.', ',')} s`;
+
+// Sync buttons only make sense for subtitle files (we draw those and can shift them)
+function setupSync(sheet, player) {
+  const box = sheet.querySelector('#s-sync');
+  box.hidden = !player.canSync;
+  if (!player.canSync) return;
+  let offset = player.offsetMs;
+  const label = sheet.querySelector('#s-offset');
+  label.textContent = formatOffset(offset);
+  const send = async (body) => {
+    try { await api('/api/player/sync', body); } catch (e) { toast(e.message, true); }
+  };
+  box.querySelectorAll('[data-delta]').forEach((btn) => {
+    btn.onclick = () => {
+      buzz(10);
+      const delta = Number(btn.dataset.delta);
+      offset += delta;
+      label.textContent = formatOffset(offset);
+      send({ deltaMs: delta });
+    };
+  });
+  sheet.querySelector('#s-sync-reset').onclick = () => {
+    offset = 0;
+    label.textContent = formatOffset(0);
+    send({ reset: true });
+  };
 }
 
 $('sub-file').addEventListener('change', async (e) => {

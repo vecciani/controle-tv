@@ -61,7 +61,12 @@ class ControlServer(
                 val body = body(session)
                 if (body.has("requirePin")) pairing.requirePin = body.getBoolean("requirePin")
                 if (body.has("player")) PlayerActivity.setPreferred(context, body.optString("player").ifEmpty { null })
-                if (body.has("subtitleLanguage")) PlayerActivity.setSubtitleLanguage(context, body.getString("subtitleLanguage"))
+                if (body.has("subtitleLanguage")) {
+                    val language = body.getString("subtitleLanguage")
+                    PlayerActivity.setSubtitleLanguage(context, language)
+                    // Get the speech model ready ahead of the next video
+                    if (language == "auto") AutoCaptions.modelOrPrepare(context) {}
+                }
                 ok()
             }
 
@@ -159,7 +164,14 @@ class ControlServer(
             path == "/api/player" -> ok(PlayerActivity.state() ?: JSONObject().put("closed", true))
 
             path == "/api/player/subtitle" && post -> {
-                if (!PlayerActivity.selectSubtitle(body(session).getInt("id"))) throw IllegalStateException("Nenhum vídeo tocando")
+                if (!PlayerActivity.selectSubtitle(body(session).getString("id"))) throw IllegalStateException("Nenhum vídeo tocando")
+                ok()
+            }
+
+            path == "/api/player/sync" && post -> {
+                val body = body(session)
+                val delta = if (body.has("deltaMs")) body.getLong("deltaMs") else null
+                if (!PlayerActivity.shiftSubtitle(delta, body.optBoolean("reset"))) throw IllegalStateException("Nenhum vídeo tocando")
                 ok()
             }
 
@@ -167,7 +179,11 @@ class ControlServer(
                 val body = body(session)
                 val name = body.optString("name").ifEmpty { "legenda.srt" }
                 val file = Subtitles.save(context, name, Base64.decode(body.getString("data"), Base64.DEFAULT))
-                if (!PlayerActivity.addSubtitle(file, name.substringBeforeLast('.'))) throw IllegalStateException("Nenhum vídeo tocando")
+                when (PlayerActivity.addSubtitle(file, name.substringBeforeLast('.'))) {
+                    null -> throw IllegalStateException("Nenhum vídeo tocando")
+                    false -> throw IllegalArgumentException("Não consegui ler esse arquivo de legenda")
+                    true -> {}
+                }
                 ok()
             }
 
@@ -247,6 +263,7 @@ class ControlServer(
             .put("lastPlay", PlayerActivity.lastPlay)
             .put("requirePin", pairing.requirePin)
             .put("subtitleLanguage", PlayerActivity.subtitleLanguage(context))
+            .put("autoCc", AutoCaptions.json())
             .put("device", "${android.os.Build.MODEL} · Android ${android.os.Build.VERSION.RELEASE} (API ${android.os.Build.VERSION.SDK_INT})")
         foreground()?.let { pkg ->
             json.put("foreground", JSONObject().put("pkg", pkg).put("label", Apps.label(context, pkg)))

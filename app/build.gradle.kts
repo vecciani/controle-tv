@@ -20,6 +20,8 @@ android {
         versionCode = versao.getProperty("apkVersion").toInt()
         versionName = "${versao.getProperty("apkVersion")}.${versao.getProperty("webVersion")}"
         buildConfigField("int", "WEB_VERSION", versao.getProperty("webVersion"))
+        // Fire TV devices are ARM: leave out the x86 speech-recognition libraries (~20 MB)
+        ndk { abiFilters += listOf("armeabi-v7a", "arm64-v8a") }
         buildConfigField("String", "UPDATE_URL", "\"${versao.getProperty("updateUrl")}\"")
     }
 
@@ -47,4 +49,6 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer-hls:1.4.1")
     implementation("androidx.media3:media3-exoplayer-dash:1.4.1")
     implementation("androidx.media3:media3-ui:1.4.1")
+    implementation("com.alphacephei:vosk-android:0.3.75")
+    testImplementation("junit:junit:4.13.2")
 }
