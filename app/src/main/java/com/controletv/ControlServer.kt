@@ -17,9 +17,6 @@ class ControlServer(
 ) : NanoHTTPD(PORT) {
 
     @Volatile
-    private var lastPhoneRequest = 0L
-
-    @Volatile
     private var foregroundCache: Pair<Long, String?> = 0L to null
 
     override fun serve(session: IHTTPSession): Response = try {
@@ -274,11 +271,6 @@ class ControlServer(
                 ok()
             }
 
-            path == "/api/qr.png" && local -> {
-                val png = Qr.png("${Net.url()}/?pin=${pairing.pin}", 480)
-                newFixedLengthResponse(Response.Status.OK, "image/png", png.inputStream(), png.size.toLong())
-            }
-
             else -> error(Response.Status.NOT_FOUND, "Rota desconhecida")
         }
     }
@@ -355,6 +347,11 @@ class ControlServer(
 
     companion object {
         const val PORT = 8765
+
+        /** When a phone last talked to us, so the TV home can show "phone connected". */
+        @Volatile
+        var lastPhoneRequest = 0L
+            private set
         private const val PHONE_ACTIVE_MS = 15_000L
     }
 }
