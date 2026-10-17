@@ -61,6 +61,16 @@
         </service>
 
         <service
+            android:name=".MediaListener"
+            android:exported="true"
+            android:label="Controle TV: widget de música"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+
+        <service
             android:name=".HomeWatcher"
             android:exported="true"
             android:label="Controle TV como tela inicial"

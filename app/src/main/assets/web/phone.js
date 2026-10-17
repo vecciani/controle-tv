@@ -743,6 +743,7 @@ function settingsSheet() {
     ${native ? `<div class="kv"><span>App do celular</span><span>versão ${native.version?.() ?? '?'}</span></div>` : ''}
     ${native ? `<div class="kv"><span>Mouse aéreo</span><span class="mono" id="s-air"></span></div>` : ''}
     ${s.lastPlay ? `<div class="kv"><span>Último vídeo</span><span class="mono" id="s-last-play"></span></div>` : ''}
+    ${s.lastFields ? `<div class="kv"><span>Campos do app</span><span class="mono" id="s-last-fields"></span></div>` : ''}
     <div class="kv"><span>Versão do app</span><span>${s.version ?? '–'}</span></div>
     <div class="kv"><span>Versão das telas</span><span>${s.webVersion ?? '–'}</span></div>
     <div class="kv"><span>Atualização</span><span id="s-update-text"></span></div>
@@ -753,6 +754,7 @@ function settingsSheet() {
       <button class="sheet-btn" id="s-probe">${icon('search')}Diagnóstico detalhado</button>` : ''}
       ${s.updatePending ? `<button class="sheet-btn primary" id="s-install">${icon('download')}Instalar atualização baixada</button>` : ''}
       <button class="sheet-btn${s.homeLauncher ? ' primary' : ''}" id="s-home">${icon('house')}${s.homeLauncher ? 'Controle TV é a tela inicial (desligar)' : 'Usar o Controle TV como tela inicial'}</button>
+      <button class="sheet-btn" id="s-name">${icon('pencil')}Nome na tela da TV: <span id="s-name-value"></span></button>
       <button class="sheet-btn" id="s-player">${icon('play')}Player da TV</button>
       <button class="sheet-btn" id="s-pin">${icon('lock')}${s.requirePin ? 'Parar de pedir PIN' : 'Pedir PIN para novos celulares'}</button>
       ${native?.updateTv ? `<button class="sheet-btn primary" id="s-update-tv">${icon('download')}Atualizar a TV pelo celular</button>` : ''}
@@ -769,6 +771,8 @@ function settingsSheet() {
   }
   const lastPlay = sheet.querySelector('#s-last-play');
   if (lastPlay) lastPlay.textContent = s.lastPlay;
+  const lastFields = sheet.querySelector('#s-last-fields');
+  if (lastFields) lastFields.textContent = s.lastFields;
   const adbError = sheet.querySelector('#s-adb-error');
   if (adbError) adbError.textContent = s.adbError;
   sheetButton(sheet, 's-retry', async () => {
@@ -780,6 +784,29 @@ function settingsSheet() {
   });
   sheetButton(sheet, 's-probe', probeSheet);
   sheetButton(sheet, 's-player', playerSheet);
+  const nameValue = sheet.querySelector('#s-name-value');
+  if (nameValue) nameValue.textContent = s.homeName || '–';
+  sheetButton(sheet, 's-name', () => {
+    const edit = openSheet(`
+      <div class="sheet-head"><div><h3>Nome na tela da TV</h3><p>Aparece em "Boa tarde, …"</p></div></div>
+      <input class="name-input" id="h-name" autocomplete="off" maxlength="40">
+      <div class="sheet-actions">
+        <button class="sheet-btn primary" id="h-save">${icon('check')}Salvar</button>
+        <button class="sheet-btn" id="h-cancel">${icon('x')}Cancelar</button>
+      </div>`);
+    const input = edit.querySelector('#h-name');
+    input.value = s.homeName || '';
+    setTimeout(() => input.focus(), 50);
+    sheetButton(edit, 'h-cancel', settingsSheet);
+    sheetButton(edit, 'h-save', async () => {
+      try {
+        await api('/api/settings', { homeName: input.value.trim() || 'Família Vecciani' });
+        await refreshStatus();
+        toast('Nome atualizado na TV');
+        settingsSheet();
+      } catch (e) { toast(e.message, true); }
+    });
+  });
   sheetButton(sheet, 's-update-tv', () => { closeSheet(); native.updateTv(); });
   sheetButton(sheet, 's-home', async () => {
     const enable = !s.homeLauncher;

@@ -66,7 +66,24 @@ class CastActivity : Activity() {
         if (position > 0) body.put("position", position)
         val headers = headers(intent)
         if (headers.length() > 0) body.put("headers", headers)
+        body.put("fields", describeExtras(intent))
         return "/api/play" to body
+    }
+
+    /** Names and types of every field the video app sent, so a subtitle we missed can be found. */
+    private fun describeExtras(intent: Intent): String {
+        val extras = intent.extras ?: return "nenhum campo"
+        @Suppress("DEPRECATION")
+        return extras.keySet().sorted().joinToString(", ") { key ->
+            val v = extras.get(key)
+            val type = when (v) {
+                null -> "null"
+                is Array<*> -> "${v.javaClass.componentType?.simpleName}[${v.size}]"
+                is Collection<*> -> "List[${v.size}]"
+                else -> v.javaClass.simpleName
+            }
+            "$key:$type"
+        }.take(600)
     }
 
     private fun looksLikeVideo(url: String) =
@@ -90,6 +107,24 @@ class CastActivity : Activity() {
         subs?.forEachIndexed { i, sub -> (sub as? Uri)?.let { found += it to names?.getOrNull(i).orEmpty() } }
         for (key in listOf("subtitles_location", "subtitle")) {
             intent.getStringExtra(key)?.let { found += Uri.parse(it) to "" }
+        }
+        // Apps name these fields in many ways: look through every extra for anything that
+        // looks like a subtitle (a field named sub/legend/caption, or a .srt/.vtt/.ass link)
+        val extras = intent.extras
+        extras?.keySet()?.forEach { key ->
+            val subtitleKey = SUBTITLE_KEY.containsMatchIn(key)
+            @Suppress("DEPRECATION")
+            val values: List<Any?> = when (val v = extras.get(key)) {
+                is Array<*> -> v.toList()
+                is Collection<*> -> v.toList()
+                else -> listOf(v)
+            }
+            values.forEach { v ->
+                val text = (v as? Uri)?.toString() ?: (v as? String)
+                if (text != null && (text.startsWith("http") || text.startsWith("content:") || text.startsWith("file:")) &&
+                    (subtitleKey || SUBTITLE_FILE.containsMatchIn(text))
+                ) found += Uri.parse(text) to ""
+            }
         }
 
         val result = JSONArray()
@@ -119,6 +154,11 @@ class CastActivity : Activity() {
             bundle.keySet().forEach { k -> bundle.getString(k)?.let { result.put(k, it) } }
         }
         return result
+    }
+
+    private companion object {
+        val SUBTITLE_KEY = Regex("(?i)sub|legend|caption|\\bcc\\b|srt|vtt")
+        val SUBTITLE_FILE = Regex("(?i)\\.(srt|vtt|ass|ssa|sub|ttml|dfxp)(\\?|$)")
     }
 
     private fun post(host: String, token: String, path: String, body: JSONObject) {

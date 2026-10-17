@@ -658,6 +658,15 @@ class PlayerActivity : Activity() {
 
         fun state(): JSONObject? = onPlayer { stateJson() }
 
+        /** Fields the video app sent with the link (diagnostics for subtitles that don't arrive). */
+        @Volatile
+        var lastFields: String? = null
+            private set
+
+        fun noteFields(fields: String) {
+            lastFields = fields.ifEmpty { null }
+        }
+
         fun selectSubtitle(id: String) = onPlayer { selectText(id) } != null
 
         /** Null when nothing is playing, false when the file had no readable captions. */
