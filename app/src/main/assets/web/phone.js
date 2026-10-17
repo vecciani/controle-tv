@@ -127,6 +127,11 @@ document.addEventListener('click', (e) => {
 // two fingers scroll. Movement is sent as a fraction of the pad width, batched every frame.
 
 const pad = $('touchpad');
+let padMode = 'mouse';
+const PAD_HINTS = {
+  mouse: 'Arraste para mover · toque para clicar · segure para clique longo · 2 dedos para rolar',
+  air: 'Encoste o polegar e aponte o celular para mover · toque rápido clica · 2 dedos para rolar',
+};
 const SPEED = 1.3;
 const TV_ASPECT = 16 / 9;
 const fingers = new Map();
@@ -171,12 +176,18 @@ pad.addEventListener('pointerdown', (e) => {
   moveDot(fingers.get(e.pointerId), e);
   if (fingers.size === 1) {
     gesture = { x0: e.clientX, y0: e.clientY, t0: Date.now(), moved: false, multi: false, held: false };
-    gesture.hold = setTimeout(() => {
-      if (gesture && !gesture.moved && !gesture.multi) { gesture.held = true; mouseClick(true); }
-    }, 600);
+    if (padMode === 'air') {
+      // Air mode: the pointer follows the phone only while the thumb is down
+      native?.airMouse(true);
+    } else {
+      gesture.hold = setTimeout(() => {
+        if (gesture && !gesture.moved && !gesture.multi) { gesture.held = true; mouseClick(true); }
+      }, 600);
+    }
   } else if (gesture) {
     gesture.multi = true;
     clearTimeout(gesture.hold);
+    if (padMode === 'air') native?.airMouse(false);
   }
 });
 
@@ -199,6 +210,7 @@ pad.addEventListener('pointermove', (e) => {
     pendingScroll += dy / f.box.height / fingers.size * 1.5;
     return;
   }
+  if (padMode === 'air') return;
   // Faster flicks travel further: gentle acceleration on top of the base speed
   const speed = Math.hypot(dx, dy) / dt;
   const accel = 1 + Math.min(speed, 3) * 0.7;
@@ -218,6 +230,7 @@ function endFinger(e) {
   fingers.delete(e.pointerId);
   if (fingers.size || !gesture) return;
   clearTimeout(gesture.hold);
+  if (padMode === 'air') native?.airMouse(false);
   if (!gesture.moved && !gesture.multi && !gesture.held && Date.now() - gesture.t0 < 300) mouseClick(false);
   gesture = null;
 }
@@ -233,7 +246,9 @@ $('pad-mode').addEventListener('click', (e) => {
 
 function setPadMode(mode) {
   $('pad-mode').querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.mode === mode));
-  $('touchpad').hidden = mode !== 'mouse';
+  padMode = mode;
+  $('touchpad').hidden = mode !== 'mouse' && mode !== 'air';
+  if (PAD_HINTS[mode]) $('pad-hint').textContent = PAD_HINTS[mode];
   $('dpad').hidden = mode !== 'dpad';
 }
 
@@ -1377,7 +1392,10 @@ paintIcons();
 $('install-tv').hidden = !native;
 $('cast-tip').hidden = !native || store.get('castTipClosed') === '1';
 $('cast-tip-close').addEventListener('click', () => { store.set('castTipClosed', '1'); $('cast-tip').hidden = true; });
-setPadMode(store.get('padMode') === 'dpad' ? 'dpad' : 'mouse');
+const hasAir = !!native?.hasGyroscope?.();
+$('mode-air').hidden = !hasAir;
+const savedMode = store.get('padMode');
+setPadMode(savedMode === 'dpad' || (savedMode === 'air' && hasAir) ? savedMode : 'mouse');
 
 const pinFromQr = new URLSearchParams(location.search).get('pin');
 if (pinFromQr) pair(pinFromQr);

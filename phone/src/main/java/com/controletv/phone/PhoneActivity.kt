@@ -55,6 +55,7 @@ class PhoneActivity : Activity() {
     private var relay: Relay? = null
     private var fileCallback: ValueCallback<Array<Uri>>? = null
     private val tvFiles by lazy { TvFiles(this) { relay } }
+    private var airMouse: AirMouse? = null
     private var pendingUpload: Pair<String, String>? = null // call id to target folder
 
     private val prefs by lazy { getSharedPreferences("tv", Context.MODE_PRIVATE) }
@@ -254,6 +255,24 @@ class PhoneActivity : Activity() {
             }.start()
         }
 
+        /** Air mouse: the pointer follows the phone's movement while [active]. */
+        @JavascriptInterface
+        fun airMouse(active: Boolean): Boolean {
+            val host = prefs.getString("host", null) ?: return false
+            if (active) {
+                val mouse = airMouse ?: AirMouse(this@PhoneActivity, host) { relay?.token }.also { airMouse = it }
+                if (!mouse.available) return false
+                mouse.start()
+            } else {
+                airMouse?.stop()
+            }
+            return true
+        }
+
+        @JavascriptInterface
+        fun hasGyroscope(): Boolean = (getSystemService(SENSOR_SERVICE) as android.hardware.SensorManager)
+            .getDefaultSensor(android.hardware.Sensor.TYPE_GYROSCOPE) != null
+
         @JavascriptInterface
         fun forgetTv() {
             main.post {
@@ -364,7 +383,13 @@ class PhoneActivity : Activity() {
         return true
     }
 
+    override fun onPause() {
+        super.onPause()
+        airMouse?.stop()
+    }
+
     override fun onDestroy() {
+        airMouse?.stop()
         relay?.stop()
         web?.destroy()
         super.onDestroy()

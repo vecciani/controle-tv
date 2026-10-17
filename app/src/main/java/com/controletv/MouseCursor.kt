@@ -40,6 +40,23 @@ object MouseCursor {
         }
     }
 
+    /**
+     * Same as [move] but doesn't wait for the screen to update: used by the air mouse, which
+     * sends dozens of small moves per second and must never queue up behind them.
+     */
+    fun moveNow(context: Context, fx: Float, fy: Float) {
+        main.post {
+            try {
+                ensureOverlay(context.applicationContext)
+                x = (x + fx * width).coerceIn(0f, width - 1f)
+                y = (y + fy * height).coerceIn(0f, height - 1f)
+                place()
+            } catch (e: Exception) {
+                // Overlay not allowed yet: the next HTTP move or click reports it
+            }
+        }
+    }
+
     fun click(context: Context, long: Boolean) {
         val (px, py) = position(context)
         Adb.shell(if (long) "input swipe $px $py $px $py 800" else "input tap $px $py")

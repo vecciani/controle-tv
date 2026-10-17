@@ -18,6 +18,7 @@ import fi.iki.elonen.NanoHTTPD
  */
 class ControlService : Service() {
     private var server: ControlServer? = null
+    private var airMouse: AirMouseReceiver? = null
 
     private val screenOn = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
@@ -31,6 +32,7 @@ class ControlService : Service() {
         server = ControlServer(this, Pairing(this)).also {
             it.start(NanoHTTPD.SOCKET_READ_TIMEOUT, false)
         }
+        airMouse = AirMouseReceiver(this, Pairing(this)).also { it.start() }
         // Generating the ADB key takes a moment the first time: keep it off the main thread
         Thread { Adb.init(this) }.start()
         Updater.startPeriodicChecks(this)
@@ -42,6 +44,7 @@ class ControlService : Service() {
     override fun onDestroy() {
         unregisterReceiver(screenOn)
         server?.stop()
+        airMouse?.stop()
         super.onDestroy()
     }
 
