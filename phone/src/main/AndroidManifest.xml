@@ -4,6 +4,8 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- Air mouse: fast gyroscope readings (Android 12+ asks for this above 200 Hz) -->
+    <uses-permission android:name="android.permission.HIGH_SAMPLING_RATE_SENSORS" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <!-- Lists the phone's apps so they can be copied to the TV -->
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />

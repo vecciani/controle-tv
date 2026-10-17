@@ -178,7 +178,9 @@ pad.addEventListener('pointerdown', (e) => {
     gesture = { x0: e.clientX, y0: e.clientY, t0: Date.now(), moved: false, multi: false, held: false };
     if (padMode === 'air') {
       // Air mode: the pointer follows the phone only while the thumb is down
-      native?.airMouse(true);
+      const problem = native?.airMouse(true);
+      // Older phone apps answered true/false; newer ones return the error text
+      if (typeof problem === 'string' && problem) toast(problem, true);
     } else {
       gesture.hold = setTimeout(() => {
         if (gesture && !gesture.moved && !gesture.multi) { gesture.held = true; mouseClick(true); }
@@ -661,6 +663,7 @@ function settingsSheet() {
     ${ADB_HELP[s.adb] ? `<p class="body" style="margin-top:12px">Para liberar o controle completo:</p>${ADB_HELP[s.adb]}` : ''}
     ${s.adbError ? `<div class="kv"><span>Detalhe</span><span class="mono" id="s-adb-error"></span></div>` : ''}
     <div class="kv"><span>Aparelho</span><span id="s-device"></span></div>
+    ${native ? `<div class="kv"><span>App do celular</span><span>versão ${native.version?.() ?? '?'}</span></div>` : ''}
     ${native ? `<div class="kv"><span>Mouse aéreo</span><span class="mono" id="s-air"></span></div>` : ''}
     ${s.lastPlay ? `<div class="kv"><span>Último vídeo</span><span class="mono" id="s-last-play"></span></div>` : ''}
     <div class="kv"><span>Versão do app</span><span>${s.version ?? '–'}</span></div>

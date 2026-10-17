@@ -55,7 +55,11 @@ class AirMouse(context: Context, private val host: String, private val token: ()
         }
         lastEvent = 0L
         gravitySensor?.let { sensors.registerListener(this, it, SensorManager.SENSOR_DELAY_GAME, handler) }
-        sensors.registerListener(this, gyro, SensorManager.SENSOR_DELAY_FASTEST, handler)
+        // 5 ms = 200 Hz: as fast as Android allows without special permission, plenty for a pointer
+        if (!sensors.registerListener(this, gyro, GYRO_PERIOD_US, handler)) {
+            stop()
+            throw IllegalStateException("O celular não liberou o giroscópio")
+        }
     }
 
     fun stop() {
@@ -110,5 +114,6 @@ class AirMouse(context: Context, private val host: String, private val token: ()
         const val TV_ASPECT = 16f / 9f
         // Ignore hand tremor and sensor drift (rad/s)
         const val DEADZONE = 0.025f
+        const val GYRO_PERIOD_US = 5_000
     }
 }

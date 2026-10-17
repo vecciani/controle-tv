@@ -255,19 +255,27 @@ class PhoneActivity : Activity() {
             }.start()
         }
 
-        /** Air mouse: the pointer follows the phone's movement while [active]. */
+        /** Air mouse: the pointer follows the phone's movement while [active]. Returns an error, or "". */
         @JavascriptInterface
-        fun airMouse(active: Boolean): Boolean {
-            val host = prefs.getString("host", null) ?: return false
-            if (active) {
-                val mouse = airMouse ?: AirMouse(this@PhoneActivity, host) { relay?.token }.also { airMouse = it }
-                if (!mouse.available) return false
-                mouse.start()
-            } else {
-                airMouse?.stop()
+        fun airMouse(active: Boolean): String {
+            val host = prefs.getString("host", null) ?: return "TV não encontrada"
+            return try {
+                if (active) {
+                    if (relay?.token == null) return "Ainda conectando à TV"
+                    val mouse = airMouse ?: AirMouse(this@PhoneActivity, host) { relay?.token }.also { airMouse = it }
+                    if (!mouse.available) return "Este celular não tem giroscópio"
+                    mouse.start()
+                } else {
+                    airMouse?.stop()
+                }
+                ""
+            } catch (e: Exception) {
+                e.message ?: "Falha no mouse aéreo"
             }
-            return true
         }
+
+        @JavascriptInterface
+        fun version(): Int = BuildConfig.VERSION_CODE
 
         @JavascriptInterface
         fun airMouseSent(): Long = airMouse?.sent ?: 0

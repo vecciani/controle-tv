@@ -68,7 +68,7 @@ object Updater {
             Thread.sleep(30_000) // let the network come up after boot
             while (true) {
                 check(context)
-                Thread.sleep(6 * 60 * 60 * 1000L)
+                Thread.sleep(60 * 60 * 1000L)
             }
         }.apply {
             name = "updater"
@@ -76,6 +76,16 @@ object Updater {
             start()
         }
     }
+
+    /** Checks in the background unless a check ran in the last few minutes. */
+    fun checkSoon(context: Context) {
+        val now = System.currentTimeMillis()
+        if (now - lastCheck < 5 * 60 * 1000L) return
+        lastCheck = now
+        Thread { check(context) }.apply { name = "updater-now"; isDaemon = true; start() }
+    }
+
+    @Volatile private var lastCheck = 0L
 
     private fun download(url: String): ByteArray {
         var current = URL(url)

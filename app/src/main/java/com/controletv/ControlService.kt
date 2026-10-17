@@ -23,6 +23,7 @@ class ControlService : Service() {
     private val screenOn = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             MainActivity.open(context)
+            Updater.checkSoon(context)
         }
     }
 
