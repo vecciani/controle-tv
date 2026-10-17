@@ -56,6 +56,7 @@ class PhoneActivity : Activity() {
     private var fileCallback: ValueCallback<Array<Uri>>? = null
     private val tvFiles by lazy { TvFiles(this) { relay } }
     private var airMouse: AirMouse? = null
+    private var udp: UdpLink? = null
     private var lastUpdateCheck = 0L
     private var lastTvCheck = 0L
 
@@ -104,6 +105,9 @@ class PhoneActivity : Activity() {
     private fun showController(host: String) {
         relay?.stop()
         relay = null
+        // The TV may have a new address: drop the old fast channel
+        udp?.close()
+        udp = null
         web?.destroy()
         web = null
 
@@ -322,14 +326,20 @@ class PhoneActivity : Activity() {
             }.start()
         }
 
-        /** Air mode as a switch: "move" (pointer follows the phone), "scroll" (tilt to scroll) or "off". */
+        /** Air mode as a switch: "move" (pointer follows the phone) or "off". */
         @JavascriptInterface
         fun airMode(mode: String): String {
             if (mode == "off") { airMouse?.stop(); return "" }
-            val problem = airMouse(true)
-            if (problem.isNotEmpty()) return problem
-            airMouse?.scrollMode = mode == "scroll"
-            return ""
+            return airMouse(true)
+        }
+
+        /** Scroll pad: drags the TV content by a fraction of the screen, over the fast UDP channel. */
+        @JavascriptInterface
+        fun scrollBy(dx: Float, dy: Float): Boolean {
+            val token = relay?.token ?: return false
+            val host = prefs.getString("host", null) ?: return false
+            val link = udp ?: UdpLink(host).also { udp = it }
+            return link.send("$token|$dx|$dy|s")
         }
 
         @JavascriptInterface
@@ -461,6 +471,7 @@ class PhoneActivity : Activity() {
 
     override fun onDestroy() {
         airMouse?.stop()
+        udp?.close()
         relay?.stop()
         web?.destroy()
         super.onDestroy()

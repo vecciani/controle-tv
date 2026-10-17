@@ -136,7 +136,7 @@ const TV_ASPECT = 16 / 9;
 const fingers = new Map();
 let gesture = null;
 let pendingMove = { x: 0, y: 0 };
-let pendingScroll = 0;
+let pendingScroll = { x: 0, y: 0 };
 let mouseBusy = false;
 let scrollBusy = false;
 
@@ -148,11 +148,11 @@ async function flushMouse() {
     try { await api('/api/mouse/move', move); } catch (e) { toast(e.message, true); }
     mouseBusy = false;
   }
-  if (!scrollBusy && Math.abs(pendingScroll) > 0.03) {
-    const y = pendingScroll;
-    pendingScroll = 0;
+  if (!scrollBusy && Math.hypot(pendingScroll.x, pendingScroll.y) > 0.03) {
+    const { x, y } = pendingScroll;
+    pendingScroll = { x: 0, y: 0 };
     scrollBusy = true;
-    try { await api('/api/mouse/scroll', { y }); } catch (e) { toast(e.message, true); }
+    try { await api('/api/mouse/scroll', { x, y }); } catch (e) { toast(e.message, true); }
     scrollBusy = false;
   }
 }
@@ -203,8 +203,9 @@ pad.addEventListener('pointermove', (e) => {
   }
   const width = f.box.width;
   if (gesture.multi) {
-    // Two fingers: scroll by the average vertical movement (content follows the fingers)
-    pendingScroll += dy / f.box.height / fingers.size * 1.5;
+    // Two fingers: scroll in any direction by the average movement (content follows the fingers)
+    pendingScroll.x += dx / f.box.width / fingers.size * 1.5;
+    pendingScroll.y += dy / f.box.height / fingers.size * 1.5;
     return;
   }
 
@@ -251,14 +252,9 @@ function setPadMode(mode) {
   $('dpad').hidden = mode !== 'dpad';
 }
 
-// ---------- Air mouse (switches instead of holding) ----------
+// ---------- Air mouse: "Mover" switch, scroll pad, select / back ----------
 
 let airMode = 'off';
-const AIR_STATUS = {
-  off: 'Sensor desligado: toque em Mover ou Rolar',
-  move: 'Movendo: aponte o celular para a TV',
-  scroll: 'Rolando: incline para a frente ou para trás (reto para parar)',
-};
 
 function setAirMode(mode) {
   if (mode === airMode) return;
@@ -271,18 +267,68 @@ function setAirMode(mode) {
     mode = 'off';
   }
   airMode = mode;
-  document.querySelectorAll('.air-toggle').forEach((b) => b.classList.toggle('on', b.dataset.air === mode));
-  $('air-status').textContent = AIR_STATUS[mode];
+  $('air-move').classList.toggle('on', mode === 'move');
+  $('air-status').textContent = mode === 'move' ? 'Ligado: aponte o celular para mover a setinha' : 'Sensor desligado: toque para ligar';
 }
 
-document.querySelectorAll('.air-toggle').forEach((btn) => {
-  // Tapping the lit switch turns the sensor off; tapping the other one switches to it
-  btn.addEventListener('click', () => { buzz(15); setAirMode(airMode === btn.dataset.air ? 'off' : btn.dataset.air); });
-});
-$('air-select').addEventListener('click', () => mouseClick(false));
-$('air-long').addEventListener('click', () => mouseClick(true));
+$('air-move').addEventListener('click', () => { buzz(15); setAirMode(airMode === 'move' ? 'off' : 'move'); });
 // Never leave the sensor running in the background
 document.addEventListener('visibilitychange', () => { if (document.visibilityState !== 'visible') setAirMode('off'); });
+
+// Select: tap = click, hold = long click
+(() => {
+  const btn = $('air-select');
+  let timer = null;
+  let held = false;
+  btn.addEventListener('pointerdown', () => {
+    held = false;
+    timer = setTimeout(() => { held = true; mouseClick(true); }, 600);
+  });
+  ['pointerup', 'pointercancel', 'pointerleave'].forEach((t) => btn.addEventListener(t, () => clearTimeout(timer)));
+  btn.addEventListener('click', () => { if (!held) mouseClick(false); });
+  btn.addEventListener('contextmenu', (e) => e.preventDefault());
+})();
+
+// Scroll pad: the TV content follows the finger in any direction, like a touch screen
+(() => {
+  const area = $('scroll-pad');
+  const SCROLL_GAIN = 1.4;
+  let last = null;
+  let pending = { x: 0, y: 0 };
+
+  area.addEventListener('contextmenu', (e) => e.preventDefault());
+  area.addEventListener('pointerdown', (e) => {
+    area.setPointerCapture(e.pointerId);
+    area.classList.add('active');
+    last = { x: e.clientX, y: e.clientY, box: area.getBoundingClientRect() };
+  });
+  area.addEventListener('pointermove', (e) => {
+    if (!last) return;
+    pending.x += (e.clientX - last.x) / last.box.width * SCROLL_GAIN;
+    pending.y += (e.clientY - last.y) / last.box.height * SCROLL_GAIN;
+    last.x = e.clientX;
+    last.y = e.clientY;
+  });
+  const end = () => { last = null; area.classList.remove('active'); };
+  area.addEventListener('pointerup', end);
+  area.addEventListener('pointercancel', end);
+
+  let httpBusy = false;
+  setInterval(async () => {
+    if (Math.hypot(pending.x, pending.y) < 0.015) return;
+    const { x, y } = pending;
+    // Fast UDP channel in the phone app; plain HTTP otherwise
+    if (native?.scrollBy) {
+      pending = { x: 0, y: 0 };
+      try { native.scrollBy(x, y); } catch {}
+    } else if (!httpBusy) {
+      pending = { x: 0, y: 0 };
+      httpBusy = true;
+      try { await api('/api/mouse/scroll', { x, y }); } catch (err) { toast(err.message, true); }
+      httpBusy = false;
+    }
+  }, 40);
+})();
 
 // ---------- Tabs ----------
 

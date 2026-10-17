@@ -10,7 +10,7 @@ import java.net.DatagramSocket
  * with no HTTP or ADB in the way, so the pointer follows the hand without noticeable delay.
  *
  * Packet: "<token>|<dx>|<dy>" with dx/dy as fractions of the screen width/height, or
- * "<token>|0|<amount>|s" to scroll (amount as a fraction of the screen height).
+ * "<token>|<dx>|<dy>|s" to scroll the content in any direction (same fractions).
  */
 class AirMouseReceiver(private val context: Context, private val pairing: Pairing) {
     companion object {
@@ -29,7 +29,8 @@ class AirMouseReceiver(private val context: Context, private val pairing: Pairin
     // Scrolling goes through ADB (a few hundred ms per swipe), so amounts pile up here and a
     // single worker turns them into one swipe at a time: no backlog, no lag building up
     private val scrollLock = Object()
-    private var scrollPending = 0f
+    private var scrollX = 0f
+    private var scrollY = 0f
 
     fun start() {
         Thread {
@@ -53,7 +54,8 @@ class AirMouseReceiver(private val context: Context, private val pairing: Pairin
                     val dy = parts[2].toFloatOrNull() ?: continue
                     if (parts.size == 4 && parts[3] == "s") {
                         synchronized(scrollLock) {
-                            scrollPending = (scrollPending + dy).coerceIn(-0.5f, 0.5f)
+                            scrollX = (scrollX + dx).coerceIn(-0.5f, 0.5f)
+                            scrollY = (scrollY + dy).coerceIn(-0.5f, 0.5f)
                             scrollLock.notifyAll()
                         }
                     } else {
@@ -67,11 +69,11 @@ class AirMouseReceiver(private val context: Context, private val pairing: Pairin
 
         Thread {
             while (true) {
-                val amount = synchronized(scrollLock) {
-                    while (kotlin.math.abs(scrollPending) < MIN_SCROLL) scrollLock.wait()
-                    scrollPending.also { scrollPending = 0f }
+                val (x, y) = synchronized(scrollLock) {
+                    while (kotlin.math.hypot(scrollX, scrollY) < MIN_SCROLL) scrollLock.wait()
+                    (scrollX to scrollY).also { scrollX = 0f; scrollY = 0f }
                 }
-                runCatching { MouseCursor.scroll(context, amount) }
+                runCatching { MouseCursor.scroll(context, x, y) }
             }
         }.apply { name = "air-scroll"; isDaemon = true; start() }
     }

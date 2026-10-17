@@ -67,12 +67,15 @@ object MouseCursor {
         Adb.shell(if (long) "input swipe $px $py $px $py 800" else "input tap $px $py")
     }
 
-    /** Drags the content under the pointer by [fy] of the screen height (positive = content moves down). */
-    fun scroll(context: Context, fy: Float) {
+    /**
+     * Drags the content under the pointer by a fraction of the screen (positive = content moves
+     * right/down), like a finger swiping on a touch screen.
+     */
+    fun scroll(context: Context, fx: Float, fy: Float) {
         val (px, py) = position(context)
-        val distance = (fy * height).toInt().coerceIn(-height / 2, height / 2)
-        val endY = (py + distance).coerceIn(1, height - 1)
-        Adb.shell("input swipe $px $py $px $endY 180")
+        val endX = (px + (fx * width).toInt().coerceIn(-width / 2, width / 2)).coerceIn(1, width - 1)
+        val endY = (py + (fy * height).toInt().coerceIn(-height / 2, height / 2)).coerceIn(1, height - 1)
+        Adb.shell("input swipe $px $py $endX $endY 200")
     }
 
     private fun position(context: Context): Pair<Int, Int> {

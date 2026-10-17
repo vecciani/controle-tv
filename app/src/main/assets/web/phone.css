@@ -349,19 +349,33 @@ body { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none
 input, textarea, .report { -webkit-user-select: text; user-select: text; -webkit-touch-callout: default; }
 .touchpad, .touchpad * { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
 .air-panel { display: flex; flex-direction: column; gap: 12px; }
-.air-toggles { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .air-toggle {
-  display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 18px 8px; border-radius: 20px;
+  display: flex; align-items: center; gap: 14px; padding: 14px 16px; border-radius: 18px; text-align: left;
   background: var(--surface); border: 1px solid var(--line); color: var(--muted); transition: box-shadow .15s, color .15s;
 }
-.air-toggle svg { width: 30px; height: 30px; }
+.air-toggle svg { width: 28px; height: 28px; }
+.air-toggle span { display: flex; flex-direction: column; }
 .air-toggle strong { font-size: 17px; color: var(--text); }
 .air-toggle small { font-size: 12px; }
 .air-toggle.on { color: var(--cyan); border-color: rgba(34, 211, 238, .6); box-shadow: var(--glow-cyan); background: rgba(34, 211, 238, .08); }
-.air-toggle[data-air="scroll"].on { color: var(--violet); border-color: rgba(168, 85, 247, .6); box-shadow: var(--glow-violet); background: rgba(168, 85, 247, .08); }
-.air-status { margin: 0; text-align: center; font-size: 13px; color: var(--muted); }
-.air-select {
-  height: 26vh; min-height: 150px; border-radius: 26px; font-size: 22px; font-weight: 800; letter-spacing: .06em;
-  background: var(--neon); color: var(--bg); box-shadow: 0 0 40px rgba(34, 211, 238, .25);
+.scroll-pad {
+  height: 34vh; min-height: 200px; border-radius: 26px; touch-action: none; position: relative; overflow: hidden;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px;
+  color: var(--muted); font-size: 13px;
+  background:
+    linear-gradient(rgba(168, 85, 247, .07) 1px, transparent 1px) 0 0 / 28px 28px,
+    linear-gradient(90deg, rgba(168, 85, 247, .07) 1px, transparent 1px) 0 0 / 28px 28px,
+    var(--surface);
+  border: 1px solid rgba(168, 85, 247, .35);
 }
-.air-select:active { transform: scale(.97); }
+.scroll-pad svg { width: 34px; height: 34px; color: var(--violet); pointer-events: none; }
+.scroll-pad span { pointer-events: none; }
+.scroll-pad.active { box-shadow: var(--glow-violet); }
+.mouse-buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.mouse-buttons button {
+  height: 16vh; min-height: 96px; border-radius: 22px; font-size: 18px; font-weight: 700;
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+}
+.mouse-left { background: var(--neon); color: var(--bg); box-shadow: 0 0 30px rgba(34, 211, 238, .25); }
+.mouse-right { background: var(--surface); border: 1px solid var(--line); color: var(--text); }
+.mouse-buttons button:active { transform: scale(.97); }

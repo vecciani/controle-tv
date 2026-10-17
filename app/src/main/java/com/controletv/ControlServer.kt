@@ -114,7 +114,8 @@ class ControlServer(
             }
 
             path == "/api/mouse/scroll" && post -> {
-                MouseCursor.scroll(context, body(session).optDouble("y").toFloat())
+                val body = body(session)
+                MouseCursor.scroll(context, body.optDouble("x", 0.0).toFloat(), body.optDouble("y", 0.0).toFloat())
                 ok()
             }
 
