@@ -11,6 +11,7 @@ import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetAddress
 import kotlin.math.abs
+import kotlin.math.atan2
 import kotlin.math.sqrt
 
 /**
@@ -35,6 +36,19 @@ class AirMouse(context: Context, private val host: String, private val token: ()
     private var pendingY = 0f
     // Unit "up" vector in phone coordinates; starts as "lying screen-up"
     private val up = floatArrayOf(0f, 0f, 1f)
+
+    /**
+     * Scroll mode: instead of moving the pointer, tilting the phone forward/back scrolls,
+     * like a joystick (the further from where it was when turned on, the faster).
+     */
+    @Volatile var scrollMode = false
+        set(value) {
+            if (value && !field) scrollReference = Float.NaN
+            field = value
+        }
+    private var scrollReference = Float.NaN
+    private var scrollPending = 0f
+    private var lastScrollSent = 0L
 
     /** Packets sent since start, for the diagnostics in Settings. */
     @Volatile var sent = 0L
@@ -79,8 +93,10 @@ class AirMouse(context: Context, private val host: String, private val token: ()
             val n = sqrt(g[0] * g[0] + g[1] * g[1] + g[2] * g[2]).takeIf { it > 1f } ?: return
             val k = if (event.sensor.type == Sensor.TYPE_GRAVITY) 1f else 0.1f
             for (i in 0..2) up[i] += (g[i] / n - up[i]) * k
+            if (scrollMode) scrollFromTilt(event.timestamp)
             return
         }
+        if (scrollMode) return
         if (lastEvent == 0L) { lastEvent = event.timestamp; return }
         val dt = (event.timestamp - lastEvent) / 1e9f
         lastEvent = event.timestamp
@@ -105,6 +121,28 @@ class AirMouse(context: Context, private val host: String, private val token: ()
         lastSent = event.timestamp
     }
 
+    /** Joystick scrolling: tilt beyond a small dead angle scrolls, faster the more it's tilted. */
+    private fun scrollFromTilt(timestamp: Long) {
+        // Forward/back tilt angle: rotation around the phone's x axis, from the gravity direction
+        val angle = Math.toDegrees(atan2(up[1].toDouble(), up[2].toDouble())).toFloat()
+        if (scrollReference.isNaN()) { scrollReference = angle; lastScrollSent = timestamp; return }
+        val tilt = angle - scrollReference
+        val dt = (timestamp - lastScrollSent) / 1e9f
+        if (abs(tilt) > SCROLL_DEAD_ANGLE) {
+            // Top tilted away (towards the TV) scrolls down: content moves up
+            val speed = (abs(tilt) - SCROLL_DEAD_ANGLE) * SCROLL_SPEED * (if (tilt > 0) 1f else -1f)
+            scrollPending += speed * dt
+        }
+        lastScrollSent = timestamp
+        if (abs(scrollPending) < 0.02f) return
+        val tok = token() ?: return
+        val s = socket ?: return
+        val a = address ?: return
+        val data = "$tok|0|$scrollPending|s".toByteArray()
+        if (runCatching { s.send(DatagramPacket(data, data.size, a, PORT)) }.isSuccess) sent++
+        scrollPending = 0f
+    }
+
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
 
     private companion object {
@@ -115,5 +153,8 @@ class AirMouse(context: Context, private val host: String, private val token: ()
         // Ignore hand tremor and sensor drift (rad/s)
         const val DEADZONE = 0.025f
         const val GYRO_PERIOD_US = 5_000
+        // Degrees of tilt ignored around the starting angle, and screens per second per degree
+        const val SCROLL_DEAD_ANGLE = 8f
+        const val SCROLL_SPEED = 0.06f
     }
 }

@@ -322,6 +322,16 @@ class PhoneActivity : Activity() {
             }.start()
         }
 
+        /** Air mode as a switch: "move" (pointer follows the phone), "scroll" (tilt to scroll) or "off". */
+        @JavascriptInterface
+        fun airMode(mode: String): String {
+            if (mode == "off") { airMouse?.stop(); return "" }
+            val problem = airMouse(true)
+            if (problem.isNotEmpty()) return problem
+            airMouse?.scrollMode = mode == "scroll"
+            return ""
+        }
+
         @JavascriptInterface
         fun airMouseSent(): Long = airMouse?.sent ?: 0
 
