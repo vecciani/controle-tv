@@ -122,11 +122,44 @@ document.addEventListener('click', (e) => {
   if (btn) sendKey(btn.dataset.key);
 });
 
-// ---------- Touchpad ----------
+// ---------- Mouse ----------
+// One finger moves the TV pointer (with acceleration), a tap clicks, holding long-clicks,
+// two fingers scroll. Movement is sent as a fraction of the pad width, batched every frame.
 
 const pad = $('touchpad');
-const STEP = 42;
-let touch = null;
+const SPEED = 1.3;
+const TV_ASPECT = 16 / 9;
+const fingers = new Map();
+let gesture = null;
+let pendingMove = { x: 0, y: 0 };
+let pendingScroll = 0;
+let mouseBusy = false;
+let scrollBusy = false;
+
+async function flushMouse() {
+  if (!mouseBusy && (pendingMove.x || pendingMove.y)) {
+    const move = pendingMove;
+    pendingMove = { x: 0, y: 0 };
+    mouseBusy = true;
+    try { await api('/api/mouse/move', move); } catch (e) { toast(e.message, true); }
+    mouseBusy = false;
+  }
+  if (!scrollBusy && Math.abs(pendingScroll) > 0.03) {
+    const y = pendingScroll;
+    pendingScroll = 0;
+    scrollBusy = true;
+    try { await api('/api/mouse/scroll', { y }); } catch (e) { toast(e.message, true); }
+    scrollBusy = false;
+  }
+}
+setInterval(flushMouse, 33);
+
+function mouseClick(long) {
+  buzz(long ? 35 : 12);
+  pad.classList.add('flash');
+  setTimeout(() => pad.classList.remove('flash'), 150);
+  api('/api/mouse/click', { long }).catch((e) => toast(e.message, true));
+}
 
 pad.addEventListener('pointerdown', (e) => {
   pad.setPointerCapture(e.pointerId);
@@ -134,45 +167,62 @@ pad.addEventListener('pointerdown', (e) => {
   const dot = document.createElement('span');
   dot.className = 'touch-dot';
   pad.append(dot);
-  touch = { x0: e.clientX, y0: e.clientY, ox: e.clientX, oy: e.clientY, t: Date.now(), moved: false, dot, box };
-  moveDot(e);
+  fingers.set(e.pointerId, { x: e.clientX, y: e.clientY, t: performance.now(), dot, box });
+  moveDot(fingers.get(e.pointerId), e);
+  if (fingers.size === 1) {
+    gesture = { x0: e.clientX, y0: e.clientY, t0: Date.now(), moved: false, multi: false, held: false };
+    gesture.hold = setTimeout(() => {
+      if (gesture && !gesture.moved && !gesture.multi) { gesture.held = true; mouseClick(true); }
+    }, 600);
+  } else if (gesture) {
+    gesture.multi = true;
+    clearTimeout(gesture.hold);
+  }
 });
 
 pad.addEventListener('pointermove', (e) => {
-  if (!touch) return;
-  moveDot(e);
-  const dx = e.clientX - touch.ox;
-  const dy = e.clientY - touch.oy;
-  if (Math.abs(dx) < STEP && Math.abs(dy) < STEP) return;
-  const horizontal = Math.abs(dx) > Math.abs(dy);
-  const delta = horizontal ? dx : dy;
-  const steps = Math.floor(Math.abs(delta) / STEP);
-  const sign = Math.sign(delta);
-  sendKey(horizontal ? (sign > 0 ? 'right' : 'left') : (sign > 0 ? 'down' : 'up'), steps);
-  // Advance the origin along the movement axis and re-anchor the other one to avoid drift
-  if (horizontal) { touch.ox += sign * steps * STEP; touch.oy = e.clientY; }
-  else { touch.oy += sign * steps * STEP; touch.ox = e.clientX; }
-  touch.moved = true;
+  const f = fingers.get(e.pointerId);
+  if (!f || !gesture) return;
+  moveDot(f, e);
+  const now = performance.now();
+  const dx = e.clientX - f.x;
+  const dy = e.clientY - f.y;
+  const dt = Math.max(1, now - f.t);
+  f.x = e.clientX; f.y = e.clientY; f.t = now;
+  if (Math.hypot(e.clientX - gesture.x0, e.clientY - gesture.y0) > 8) {
+    gesture.moved = true;
+    clearTimeout(gesture.hold);
+  }
+  const width = f.box.width;
+  if (gesture.multi) {
+    // Two fingers: scroll by the average vertical movement (content follows the fingers)
+    pendingScroll += dy / f.box.height / fingers.size * 1.5;
+    return;
+  }
+  // Faster flicks travel further: gentle acceleration on top of the base speed
+  const speed = Math.hypot(dx, dy) / dt;
+  const accel = 1 + Math.min(speed, 3) * 0.7;
+  pendingMove.x += dx / width * SPEED * accel;
+  pendingMove.y += dy / width * SPEED * accel * TV_ASPECT;
 });
 
-function moveDot(e) {
-  touch.dot.style.left = `${e.clientX - touch.box.left}px`;
-  touch.dot.style.top = `${e.clientY - touch.box.top}px`;
+function moveDot(f, e) {
+  f.dot.style.left = `${e.clientX - f.box.left}px`;
+  f.dot.style.top = `${e.clientY - f.box.top}px`;
 }
 
-function endTouch(e) {
-  if (!touch) return;
-  const distance = Math.hypot(e.clientX - touch.x0, e.clientY - touch.y0);
-  if (!touch.moved && distance < 12 && Date.now() - touch.t < 350) {
-    sendKey('ok');
-    pad.classList.add('flash');
-    setTimeout(() => pad.classList.remove('flash'), 150);
-  }
-  touch.dot.remove();
-  touch = null;
+function endFinger(e) {
+  const f = fingers.get(e.pointerId);
+  if (!f) return;
+  f.dot.remove();
+  fingers.delete(e.pointerId);
+  if (fingers.size || !gesture) return;
+  clearTimeout(gesture.hold);
+  if (!gesture.moved && !gesture.multi && !gesture.held && Date.now() - gesture.t0 < 300) mouseClick(false);
+  gesture = null;
 }
-pad.addEventListener('pointerup', endTouch);
-pad.addEventListener('pointercancel', endTouch);
+pad.addEventListener('pointerup', endFinger);
+pad.addEventListener('pointercancel', endFinger);
 
 $('pad-mode').addEventListener('click', (e) => {
   const btn = e.target.closest('button');
@@ -183,7 +233,7 @@ $('pad-mode').addEventListener('click', (e) => {
 
 function setPadMode(mode) {
   $('pad-mode').querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.mode === mode));
-  $('touchpad').hidden = mode !== 'touch';
+  $('touchpad').hidden = mode !== 'mouse';
   $('dpad').hidden = mode !== 'dpad';
 }
 
@@ -984,7 +1034,7 @@ $('install-tv').addEventListener('click', async () => {
       <button class="sheet-btn primary" id="s-file">${icon('download')}Escolher arquivo APK</button>
       <button class="sheet-btn" id="s-copy">${icon('phone')}Copiar um app deste celular</button>
     </div>
-    <p class="hint small" style="margin-top:14px">${icon('info')}Apps de celular funcionam na TV, mas foram feitos para toque. Use o Touchpad para navegar neles.</p>`);
+    <p class="hint small" style="margin-top:14px">${icon('info')}Apps de celular funcionam na TV, mas foram feitos para toque. Use o Mouse para navegar neles.</p>`);
   sheetButton(sheet, 's-file', () => { closeSheet(); native.pickApk(); });
   sheetButton(sheet, 's-copy', phoneAppsSheet);
   try {
@@ -1114,7 +1164,7 @@ paintIcons();
 $('install-tv').hidden = !native;
 $('cast-tip').hidden = !native || store.get('castTipClosed') === '1';
 $('cast-tip-close').addEventListener('click', () => { store.set('castTipClosed', '1'); $('cast-tip').hidden = true; });
-setPadMode(store.get('padMode') || 'touch');
+setPadMode(store.get('padMode') === 'dpad' ? 'dpad' : 'mouse');
 
 const pinFromQr = new URLSearchParams(location.search).get('pin');
 if (pinFromQr) pair(pinFromQr);

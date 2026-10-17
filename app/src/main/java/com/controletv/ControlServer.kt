@@ -104,6 +104,22 @@ class ControlServer(
                 ok()
             }
 
+            path == "/api/mouse/move" && post -> {
+                val body = body(session)
+                MouseCursor.move(context, body.optDouble("x").toFloat(), body.optDouble("y").toFloat())
+                ok()
+            }
+
+            path == "/api/mouse/click" && post -> {
+                MouseCursor.click(context, body(session).optBoolean("long"))
+                ok()
+            }
+
+            path == "/api/mouse/scroll" && post -> {
+                MouseCursor.scroll(context, body(session).optDouble("y").toFloat())
+                ok()
+            }
+
             path == "/api/text" && post -> {
                 val body = body(session)
                 Remote.type(body.optInt("backspaces"), body.optString("text"), body.optBoolean("enter"))
