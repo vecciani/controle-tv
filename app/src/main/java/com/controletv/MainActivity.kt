@@ -56,6 +56,7 @@ import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import org.json.JSONObject
+import kotlin.math.roundToInt
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -106,6 +107,14 @@ class MainActivity : Activity() {
     private var heroPending: Runnable? = null
     private var backdropUrl: String? = null
     private val metaCache = ConcurrentHashMap<String, JSONObject>()
+
+    // Tabs: each one swaps the rows below
+    private var tab = "media"
+    private val tabViews = mutableMapOf<String, LinearLayout>()
+    private var rebuilding = false
+    private var lastMedia: Pair<JSONObject, String?>? = null
+    private var data: HomeData? = null
+    private var focusedOnce = false
 
     private lateinit var rowsScroll: ScrollView
     private lateinit var rows: LinearLayout
@@ -179,9 +188,30 @@ class MainActivity : Activity() {
 
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
-        // This is the home screen: Back goes to the top instead of leaving
+        // This is the home screen: Back goes up to the tabs, then to "Filmes e séries", instead of leaving
+        val focus = currentFocus
         rowsScroll.smoothScrollTo(0, 0)
-        firstCard()?.requestFocus()
+        when {
+            focus != null && inRows(focus) -> tabViews[tab]?.requestFocus()
+            tab != "media" -> tabViews["media"]?.requestFocus()
+            else -> firstCard()?.requestFocus()
+        }
+    }
+
+    /** Up from the first row lands on the current tab, down from a tab on the first card. */
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (event.action == KeyEvent.ACTION_DOWN) {
+            val focus = currentFocus
+            if (event.keyCode == KeyEvent.KEYCODE_DPAD_UP && focus != null && inRows(focus) && rowOf(focus) === rows.getChildAt(0)) {
+                tabViews[tab]?.requestFocus()
+                return true
+            }
+            if (event.keyCode == KeyEvent.KEYCODE_DPAD_DOWN && (focus?.tag as? String)?.startsWith("tab:") == true) {
+                firstCard()?.requestFocus()
+                return true
+            }
+        }
+        return super.dispatchKeyEvent(event)
     }
 
     // ---------- Layout ----------
@@ -265,7 +295,7 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER_VERTICAL
         }
         val hello = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        greeting = text(3.0f, TEXT, bold = true).apply {
+        greeting = text(2.7f, TEXT, bold = true).apply {
             letterSpacing = -0.02f
             maxLines = 1
             ellipsize = TextUtils.TruncateAt.END
@@ -278,6 +308,22 @@ class MainActivity : Activity() {
         header.addView(buildMusicWidget(), LinearLayout.LayoutParams(u(34f), WRAP_CONTENT))
         content.addView(header, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = u(1.2f) })
 
+        // Tabs: moving onto one swaps the rows below (Filmes e séries · Apps · Configurações · Descanso)
+        val tabBar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        TABS.forEach { (id, label, icon) ->
+            val view = tabView(id, label, icon)
+            tabViews[id] = view
+            tabBar.addView(view, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { rightMargin = u(0.8f) })
+        }
+        content.addView(tabBar, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply {
+            topMargin = u(1.1f)
+            leftMargin = -u(1.4f)
+        })
+        styleTabs()
+
         // Hero: logo (or title), rating · year · length · genres, synopsis, hint
         val hero = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -288,7 +334,7 @@ class MainActivity : Activity() {
             adjustViewBounds = true
             visibility = View.GONE
         }
-        hero.addView(heroLogo, LinearLayout.LayoutParams(u(26f), (screenH * 0.10f).toInt()))
+        hero.addView(heroLogo, LinearLayout.LayoutParams(u(24f), (screenH * 0.085f).toInt()))
         heroTitle = text(3.6f, TEXT, bold = true).apply {
             maxLines = 2
             ellipsize = TextUtils.TruncateAt.END
@@ -328,7 +374,7 @@ class MainActivity : Activity() {
         hero.addView(heroCredits, LinearLayout.LayoutParams(u(50f), WRAP_CONTENT).apply { topMargin = u(0.7f) })
         heroHint = text(1.05f, CYAN)
         hero.addView(heroHint, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { topMargin = u(0.9f) })
-        content.addView(hero, LinearLayout.LayoutParams(MATCH_PARENT, (screenH * 0.34f).toInt()))
+        content.addView(hero, LinearLayout.LayoutParams(MATCH_PARENT, (screenH * 0.30f).toInt()))
 
         // Rows: the focused one slides up under the hero (see bringRowToTop)
         rows = LinearLayout(this).apply {
@@ -398,13 +444,88 @@ class MainActivity : Activity() {
 
     /** Slides the row holding [view] up to the top of the rows area, Netflix style. */
     private fun bringRowToTop(view: View) {
+        rowOf(view)?.let { rowsScroll.smoothScrollTo(0, it.top) }
+    }
+
+    /** The row (direct child of [rows]) holding [view], or null when it's elsewhere. */
+    private fun rowOf(view: View): View? {
         var child: View = view
         var parent = child.parent
         while (parent is View && parent !== rows) {
             child = parent
             parent = child.parent
         }
-        if (parent === rows) rowsScroll.smoothScrollTo(0, child.top)
+        return if (parent === rows) child else null
+    }
+
+    private fun inRows(view: View) = rowOf(view) != null
+
+    // ---------- Tabs ----------
+
+    private fun tabView(id: String, label: String, icon: Int) = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        gravity = Gravity.CENTER_HORIZONTAL
+        isFocusable = true
+        isFocusableInTouchMode = true
+        tag = "tab:$id"
+        setPadding(u(1.4f), u(0.6f), u(1.4f), u(0.45f))
+        background = StateListDrawable().apply {
+            addState(intArrayOf(android.R.attr.state_focused), rounded(0x3322D3EE, u(3f).toFloat(), CYAN))
+            addState(intArrayOf(), rounded(Color.TRANSPARENT, u(3f).toFloat(), Color.TRANSPARENT))
+        }
+        addView(text(1.45f, MUTED, bold = true).apply {
+            text = label
+            compoundDrawablePadding = u(0.6f)
+            setCompoundDrawables(getDrawable(icon)!!.mutate().apply { setBounds(0, 0, u(1.5f), u(1.5f)) }, null, null, null)
+        })
+        // Underline of the open tab
+        addView(View(this@MainActivity).apply { background = rounded(CYAN, u(0.2f).toFloat(), CYAN) },
+            LinearLayout.LayoutParams(u(2.6f), maxOf(3, u(0.22f))).apply { topMargin = u(0.4f) })
+        setOnFocusChangeListener { _, focused -> if (focused && !rebuilding) selectTab(id) }
+        setOnClickListener { firstCard()?.requestFocus() }
+    }
+
+    private fun styleTabs() {
+        tabViews.forEach { (id, box) ->
+            val open = id == tab
+            val title = box.getChildAt(0) as TextView
+            title.setTextColor(if (open) TEXT else MUTED)
+            title.compoundDrawables[0]?.setColorFilter(if (open) CYAN else MUTED, PorterDuff.Mode.SRC_IN)
+            box.getChildAt(1).visibility = if (open) View.VISIBLE else View.INVISIBLE
+        }
+    }
+
+    /** Opens a tab: its rows slide in from the side it was moved to. */
+    private fun selectTab(id: String) {
+        if (id != tab) {
+            val from = TABS.indexOfFirst { it.first == tab }
+            val to = TABS.indexOfFirst { it.first == id }
+            tab = id
+            styleTabs()
+            rowsScroll.scrollTo(0, 0)
+            fillRows()
+            rowsScroll.translationX = (if (to > from) 1 else -1) * u(7f).toFloat()
+            rowsScroll.alpha = 0f
+            rowsScroll.animate().translationX(0f).alpha(1f).setDuration(280).setInterpolator(DecelerateInterpolator()).start()
+        }
+        heroForTab()
+    }
+
+    /** What the hero says while the cursor is on a tab. */
+    private fun heroForTab() {
+        when (tab) {
+            "media" -> lastMedia?.let { (item, extra) -> heroFor(item, extra) }
+                ?: heroText("Filmes e séries", "Do seu Stremio: o que você está vendo, lançamentos e gêneros", "Desça para escolher")
+            "apps" -> heroText("Apps", "${data?.apps?.size ?: 0} apps na TV   ·   favoritos e pastas", "Desça para escolher   ·   segure OK num app para opções")
+            "settings" -> heroText("Configurações", "Telas da Fire TV, entradas e a tela inicial", "Desça para escolher")
+            else -> heroText("Descanso de tela", restSummary(), "Desça para mudar")
+        }
+    }
+
+    private fun restSummary(): String {
+        val photos = data?.photos?.size ?: 0
+        val state = if (ScreenSaver.enabled(this)) "Liga sozinho depois de ${ScreenSaver.minutes(this)} min sem usar" else "Desligado"
+        return "$state   ·   $photos ${if (photos == 1) "foto" else "fotos"}"
     }
 
     // ---------- Hero ----------
@@ -413,6 +534,7 @@ class MainActivity : Activity() {
     private fun heroFor(item: JSONObject, extra: String?) {
         val id = item.optString("id")
         heroKey = id
+        lastMedia = item to extra
         applyHero(merge(item, metaCache[id]), extra)
         heroPending?.let { handler.removeCallbacks(it) }
         heroPending = Runnable {
@@ -542,6 +664,15 @@ class MainActivity : Activity() {
 
     // ---------- Rows ----------
 
+    /** Everything the rows are built from, gathered in the background. */
+    private class HomeData(
+        val apps: List<AppInfo>,
+        val favorites: List<String>,
+        val rowOrder: List<String>,
+        val sorted: Map<String, List<AppInfo>>,
+        val photos: List<java.io.File>,
+    )
+
     private fun loadApps(force: Boolean) {
         loader.execute {
             val hidden = HomePrefs.hidden(this)
@@ -550,48 +681,130 @@ class MainActivity : Activity() {
             val folders = apps.associate { it.pkg to Folders.folderOf(this, it.pkg, it.label) }
             val rowOrder = HomePrefs.rowOrder(this)
             val sorted = rowOrder.associateWith { id -> HomePrefs.sortFolder(this, id, apps.filter { folders[it.pkg] == id }) }
+            val photos = ScreenSaver.photos()
             val signature = "s$stremioVersion|" + WatchHistory.list(this).joinToString { it.id + it.position / 60_000 } + WatchNext.entries().size +
-                rowOrder.joinToString { id -> id + ":" + sorted[id]!!.joinToString(",") { it.pkg } } + "|" + favorites.joinToString()
+                rowOrder.joinToString { id -> id + ":" + sorted[id]!!.joinToString(",") { it.pkg } } + "|" + favorites.joinToString() +
+                "|" + photos.joinToString { it.name }
             runOnUiThread {
                 if (!force && signature == shownSignature) return@runOnUiThread
                 shownSignature = signature
-                val focused = currentFocus?.tag as? String
-                rows.removeAllViews()
-                val byPkg = apps.associateBy { it.pkg }
-
-                // Stremio first: continue watching (landscape), then posters
-                rows.addView(row("Continuar assistindo",
-                    if (stremioWatching.isNotEmpty()) stremioWatching.take(12).map { stremioWideCard(it) } else listOf(stremioHintCard())))
-                if (newMovies.isNotEmpty()) rows.addView(row("Filmes novos", newMovies.take(MAX_PER_ROW).map { stremioPoster(it) }))
-                if (newSeries.isNotEmpty()) rows.addView(row("Séries novas", newSeries.take(MAX_PER_ROW).map { stremioPoster(it) }))
-                genreRows.forEach { (title, items) -> if (items.isNotEmpty()) rows.addView(row(title, items.take(MAX_PER_ROW).map { stremioPoster(it) })) }
-                if (stremioLibrary.isNotEmpty()) rows.addView(row("Minha biblioteca", stremioLibrary.take(MAX_PER_ROW).map { stremioPoster(it) }))
-
-                val history = WatchHistory.list(this)
-                val watchNext = WatchNext.entries()
-                if (history.isNotEmpty() || watchNext.isNotEmpty()) {
-                    rows.addView(row("Continuar no Tocar na TV", history.map { historyCard(it) } + watchNext.map { watchNextCard(it) }))
-                }
-                if (favorites.isNotEmpty()) {
-                    rows.addView(row("Favoritos", favorites.mapNotNull { byPkg[it] }.map { appCard(it, true) }, R.drawable.ic_star))
-                }
-                for (id in rowOrder) {
-                    val folder = Folders.ALL.first { it.id == id }
-                    val inFolder = sorted[id].orEmpty()
-                    if (inFolder.isNotEmpty()) rows.addView(row(folder.title, inFolder.map { appCard(it, it.pkg in favorites, folder.title) }))
-                }
-                val inputs = SystemShortcuts.inputs(this)
-                if (inputs.isNotEmpty()) {
-                    rows.addView(row("Entradas", inputs.map { input ->
-                        card("in:${input.id}", input.label, "Entrada da TV", false, { it.setImageResource(R.drawable.ic_t_display) }, iconTile = true) {
-                            if (!SystemShortcuts.openInput(this, input)) toast("Não deu para trocar para ${input.label}")
-                        }
-                    }))
-                }
-                rows.addView(row("Configurações", settingsTiles()))
-                val target = focused?.let { rows.findViewWithTag<View>(it) } ?: firstCard()
-                target?.requestFocus()
+                data = HomeData(apps, favorites, rowOrder, sorted, photos)
+                fillRows()
             }
+        }
+    }
+
+    /** Builds the rows of the open tab, keeping the focus where it was. */
+    private fun fillRows() {
+        val d = data ?: return
+        val focus = currentFocus
+        val focusInRows = focus != null && inRows(focus)
+        val focusedTag = if (focusInRows) focus?.tag as? String else null
+        rebuilding = true
+        rows.removeAllViews()
+        when (tab) {
+            "media" -> mediaRows()
+            "apps" -> appRows(d)
+            "settings" -> settingsRows()
+            else -> restRows(d)
+        }
+        rebuilding = false
+        // Take the focus back only when it was in the rows (or on first show), never from the tabs or the top
+        if (focusInRows || !focusedOnce || currentFocus == null) {
+            focusedOnce = true
+            (focusedTag?.let { rows.findViewWithTag<View>(it) } ?: firstCard())?.requestFocus()
+        }
+    }
+
+    private fun mediaRows() {
+        rows.addView(row("Continuar assistindo",
+            if (stremioWatching.isNotEmpty()) stremioWatching.take(12).map { stremioWideCard(it) } else listOf(stremioHintCard())))
+        if (newMovies.isNotEmpty()) rows.addView(row("Filmes novos", newMovies.take(MAX_PER_ROW).map { stremioPoster(it) }))
+        if (newSeries.isNotEmpty()) rows.addView(row("Séries novas", newSeries.take(MAX_PER_ROW).map { stremioPoster(it) }))
+        genreRows.forEach { (title, items) -> if (items.isNotEmpty()) rows.addView(row(title, items.take(MAX_PER_ROW).map { stremioPoster(it) })) }
+        if (stremioLibrary.isNotEmpty()) rows.addView(row("Minha biblioteca", stremioLibrary.take(MAX_PER_ROW).map { stremioPoster(it) }))
+        val history = WatchHistory.list(this)
+        val watchNext = WatchNext.entries()
+        if (history.isNotEmpty() || watchNext.isNotEmpty()) {
+            rows.addView(row("Continuar no Tocar na TV", history.map { historyCard(it) } + watchNext.map { watchNextCard(it) }))
+        }
+    }
+
+    private fun appRows(d: HomeData) {
+        val byPkg = d.apps.associateBy { it.pkg }
+        if (d.favorites.isNotEmpty()) {
+            rows.addView(row("Favoritos", d.favorites.mapNotNull { byPkg[it] }.map { appCard(it, true) }, R.drawable.ic_star))
+        }
+        for (id in d.rowOrder) {
+            val folder = Folders.ALL.first { it.id == id }
+            val inFolder = d.sorted[id].orEmpty()
+            if (inFolder.isNotEmpty()) rows.addView(row(folder.title, inFolder.map { appCard(it, it.pkg in d.favorites, folder.title) }))
+        }
+    }
+
+    private fun settingsRows() {
+        rows.addView(row("Telas da Fire TV", SystemShortcuts.SETTINGS.map { shortcut ->
+            card(shortcut.key, shortcut.title, "Configurações da TV", false, { it.setImageResource(shortcut.icon) }, iconTile = true) {
+                if (!SystemShortcuts.open(this, shortcut)) toast("Esta TV não abriu essa tela. Veja o diagnóstico nos Ajustes do celular.")
+            }
+        }))
+        val inputs = SystemShortcuts.inputs(this)
+        if (inputs.isNotEmpty()) {
+            rows.addView(row("Entradas", inputs.map { input ->
+                card("in:${input.id}", input.label, "Entrada da TV", false, { it.setImageResource(R.drawable.ic_t_display) }, iconTile = true) {
+                    if (!SystemShortcuts.openInput(this, input)) toast("Não deu para trocar para ${input.label}")
+                }
+            }))
+        }
+        rows.addView(row("Tela inicial", homeTiles()))
+    }
+
+    /** Descanso: start it, turn it on/off, how long to wait, how dark, and the photos it shows. */
+    private fun restRows(d: HomeData) {
+        val on = ScreenSaver.enabled(this)
+        val minutes = ScreenSaver.minutes(this)
+        val dim = ScreenSaver.dim(this)
+        fun changed() { fillRows() }
+        rows.addView(row("Descanso de tela", listOf(
+            card("rest:start", "Começar agora", "Mostra suas fotos agora", false, { it.setImageResource(R.drawable.ic_tab_moon) }, iconTile = true) {
+                ScreenSaver.start(this)
+            },
+            card("rest:on", if (on) "Ligado" else "Desligado", "OK liga ou desliga o descanso", false, { it.setImageResource(R.drawable.ic_t_power) }, iconTile = true) {
+                ScreenSaver.configure(this, !on, null, null); changed()
+            },
+            card("rest:min", "Depois de $minutes min", "OK muda o tempo sem usar até ele começar", false, { it.setImageResource(R.drawable.ic_t_timer) }, iconTile = true) {
+                ScreenSaver.configure(this, null, REST_MINUTES.firstOrNull { it > minutes } ?: REST_MINUTES.first(), null); changed()
+            },
+            card("rest:dim", "Escurecer ${(dim * 100).roundToInt()}%", "OK muda o quanto as fotos escurecem", false, { it.setImageResource(R.drawable.ic_t_dim) }, iconTile = true) {
+                ScreenSaver.configure(this, null, null, REST_DIM.firstOrNull { it > dim + 0.01f } ?: REST_DIM.first()); changed()
+            },
+        )))
+        val photos = d.photos
+        rows.addView(row(if (photos.isEmpty()) "Suas fotos" else "Suas fotos (${photos.size})",
+            if (photos.isEmpty()) {
+                listOf(card("rest:nophotos", "Sem fotos ainda", "Mande pelo celular: Ajustes → Tela de descanso", false, { it.setImageResource(R.drawable.ic_tab_moon) }, iconTile = true) {
+                    toast("Mande fotos pelo celular: Ajustes → Tela de descanso")
+                })
+            } else {
+                photos.take(MAX_PER_ROW * 2).map { file ->
+                    card("rest:p:${file.name}", file.nameWithoutExtension, "OK começa o descanso", false, { loadPhoto(file, it) }) { ScreenSaver.start(this) }
+                }
+            }))
+    }
+
+    /** A photo from the TV's storage, shrunk to card size. */
+    private fun loadPhoto(file: java.io.File, into: ImageView) {
+        into.tag = file.path
+        val width = u(13.5f)
+        loader.execute {
+            val bitmap = runCatching {
+                val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                BitmapFactory.decodeFile(file.path, bounds)
+                var sample = 1
+                while (bounds.outWidth / (sample * 2) >= width) sample *= 2
+                BitmapFactory.decodeFile(file.path, BitmapFactory.Options().apply { inSampleSize = sample })
+            }.getOrNull() ?: return@execute
+            runOnUiThread { if (into.tag == file.path) into.setImageBitmap(bitmap) }
         }
     }
 
@@ -720,7 +933,7 @@ class MainActivity : Activity() {
     /** Big poster (2:3) for films and series. */
     private fun stremioPoster(item: JSONObject): View {
         val id = item.optString("id")
-        val w = u(11.5f)
+        val w = u(10.5f)
         return mediaTile(
             key = "sp:$id", item = item, extra = null,
             imageUrl = item.optString("poster").ifEmpty { "https://images.metahub.space/poster/medium/$id/img" }, fallbackUrl = null,
@@ -929,14 +1142,8 @@ class MainActivity : Activity() {
 
     // ---------- Settings row ----------
 
-    private fun settingsTiles(): List<View> {
+    private fun homeTiles(): List<View> {
         val tiles = mutableListOf<View>()
-        // Each one tries several ways into Fire TV's settings app until one opens
-        SystemShortcuts.SETTINGS.forEach { shortcut ->
-            tiles += card(shortcut.key, shortcut.title, "Configurações da TV", false, { it.setImageResource(shortcut.icon) }, iconTile = true) {
-                if (!SystemShortcuts.open(this, shortcut)) toast("Esta TV não abriu essa tela. Veja o diagnóstico nos Ajustes do celular.")
-            }
-        }
         packageManager.getLaunchIntentForPackage("com.amazon.venezia")?.let { store ->
             tiles += card("set:store", "Loja de apps", "Amazon Appstore", false, { it.setImageResource(R.drawable.ic_t_store) }, iconTile = true) {
                 runCatching { startActivity(store.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }.onFailure { toast("A loja não abriu") }
@@ -1140,7 +1347,7 @@ class MainActivity : Activity() {
             clipToOutline = true
             setImageResource(R.drawable.ic_m_music)
         }
-        box.addView(musicArt, LinearLayout.LayoutParams(u(6f), u(6f)))
+        box.addView(musicArt, LinearLayout.LayoutParams(u(5f), u(5f)))
         val info = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(u(1f), 0, u(0.6f), 0)
@@ -1152,7 +1359,7 @@ class MainActivity : Activity() {
         musicControls = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(0, u(0.6f), 0, 0)
+            setPadding(0, u(0.4f), 0, 0)
         }
         musicControls.addView(mediaButton(R.drawable.ic_m_prev, false) { MediaListener.current(this)?.transportControls?.skipToPrevious() })
         musicPlay = mediaButton(R.drawable.ic_m_play, true) {
@@ -1174,7 +1381,7 @@ class MainActivity : Activity() {
 
     private fun mediaButton(icon: Int, primary: Boolean, onClick: () -> Unit) = ImageView(this).apply {
         setImageResource(icon)
-        val size = u(if (primary) 3.4f else 2.8f)
+        val size = u(if (primary) 3.0f else 2.5f)
         layoutParams = LinearLayout.LayoutParams(size, size).apply { rightMargin = u(0.8f) }
         setPadding(u(0.6f), u(0.6f), u(0.6f), u(0.6f))
         isFocusable = true
@@ -1402,6 +1609,14 @@ class MainActivity : Activity() {
 
         /** Fewer, bigger posters per row. */
         private const val MAX_PER_ROW = 12
+        private val TABS = listOf(
+            Triple("media", "Filmes e séries", R.drawable.ic_tab_film),
+            Triple("apps", "Apps", R.drawable.ic_t_apps),
+            Triple("settings", "Configurações", R.drawable.ic_t_settings),
+            Triple("rest", "Descanso", R.drawable.ic_tab_moon),
+        )
+        private val REST_MINUTES = listOf(1, 2, 5, 10, 15, 30)
+        private val REST_DIM = listOf(0f, 0.2f, 0.35f, 0.5f)
 
         /** Genre rows on the home (title shown, Stremio genre name). */
         private val GENRES = listOf("Comédia" to "Comedy", "Ficção científica" to "Sci-Fi", "Drama" to "Drama")
