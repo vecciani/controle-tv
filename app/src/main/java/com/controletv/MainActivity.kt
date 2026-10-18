@@ -83,8 +83,12 @@ class MainActivity : Activity() {
     private lateinit var clock: TextView
     private lateinit var greeting: TextView
     private lateinit var date: TextView
-    // Search, status, greeting and music: shown on the menu, hidden while browsing the rows
-    private lateinit var header: LinearLayout
+    // Welcome screen (search, status, greeting, music) above the tabs: fills the screen while the
+    // cursor is up there, folds away while browsing the rows
+    private lateinit var header: FrameLayout
+    private lateinit var tabRow: LinearLayout
+    private lateinit var welcomeBack: ImageView
+    private var welcomeUrl: String? = null
     private var headerShown = true
     private var headerAnim: ValueAnimator? = null
     private lateinit var phoneChip: ImageView
@@ -164,6 +168,7 @@ class MainActivity : Activity() {
         super.onCreate(savedInstanceState)
         ControlService.start(this)
         setContentView(buildScreen())
+        header.post { fitWelcome() }
         registerReceiver(packages, IntentFilter().apply {
             addAction(Intent.ACTION_PACKAGE_ADDED)
             addAction(Intent.ACTION_PACKAGE_REMOVED)
@@ -225,14 +230,28 @@ class MainActivity : Activity() {
     private fun buildScreen(): View {
         val root = FrameLayout(this).apply { background = NeonBackground() }
 
-        // A column of bands that never overlap: the top (search, status, greeting, music), which
-        // folds away while browsing the rows; the tabs; the focused title's hero; the rows
+        // A column of bands that never overlap: the welcome screen (search, status, greeting,
+        // music), which fills the screen on the menu and folds away while browsing; the tabs;
+        // the focused title's hero; the rows
         val column = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
 
-        // ---- Top: search bar, then status and clock; below, greeting and date, and the music player
-        header = LinearLayout(this).apply {
+        // ---- Welcome: a dim picture of something to watch behind the search bar, status and
+        // clock; then the big greeting, the date and the music player
+        header = FrameLayout(this)
+        welcomeBack = ImageView(this).apply {
+            scaleType = ImageView.ScaleType.CENTER_CROP
+            alpha = 0f
+        }
+        header.addView(welcomeBack, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+        header.addView(View(this).apply {
+            background = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT, intArrayOf(0xF207070C.toInt(), 0x9907070C.toInt(), 0x4D07070C))
+        }, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+        header.addView(View(this).apply {
+            background = GradientDrawable(GradientDrawable.Orientation.BOTTOM_TOP, intArrayOf(0xFF07070C.toInt(), 0x0007070C))
+        }, FrameLayout.LayoutParams(MATCH_PARENT, (screenH * 0.25f).toInt(), Gravity.BOTTOM))
+        val welcome = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(u(3.5f), (screenH * 0.022f).toInt(), u(3.5f), 0)
+            setPadding(u(3.5f), (screenH * 0.03f).toInt(), u(3.5f), 0)
         }
         val topRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -278,29 +297,26 @@ class MainActivity : Activity() {
         topRow.addView(wifiButton, LinearLayout.LayoutParams(u(2.5f), u(2.5f)).apply { rightMargin = u(1.4f) })
         clock = text(2.2f, TEXT, bold = true)
         topRow.addView(clock)
-        header.addView(topRow)
+        welcome.addView(topRow)
 
-        val helloRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
-        val hello = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        greeting = text(2.7f, TEXT, bold = true).apply {
+        welcome.addView(View(this), LinearLayout.LayoutParams(0, 0, 1f))
+        greeting = text(4.6f, TEXT, bold = true).apply {
             letterSpacing = -0.02f
             maxLines = 1
             ellipsize = TextUtils.TruncateAt.END
-            setShadowLayer(u(1f).toFloat(), 0f, 0f, 0x5522D3EE)
+            setShadowLayer(u(1.2f).toFloat(), 0f, 0f, 0x6622D3EE)
         }
-        date = text(1.35f, MUTED)
-        hello.addView(greeting)
-        hello.addView(date, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { topMargin = u(0.5f) })
-        helloRow.addView(hello, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
-        helloRow.addView(buildMusicWidget(), LinearLayout.LayoutParams(u(30f), WRAP_CONTENT))
-        header.addView(helloRow, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = u(1f) })
-        column.addView(header, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+        date = text(1.8f, 0xCCF2F2F7.toInt())
+        welcome.addView(greeting)
+        welcome.addView(date, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { topMargin = u(0.7f) })
+        welcome.addView(buildMusicWidget(), LinearLayout.LayoutParams(u(46f), WRAP_CONTENT).apply { topMargin = u(2.6f) })
+        welcome.addView(View(this), LinearLayout.LayoutParams(0, 0, 1.3f))
+        header.addView(welcome, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+        // Starts filling the screen; adjusted to the exact space once laid out (see fitWelcome)
+        column.addView(header, LinearLayout.LayoutParams(MATCH_PARENT, (screenH * 0.88f).toInt()))
 
         // ---- Tabs: always visible; moving onto one swaps the rows
-        val tabRow = LinearLayout(this).apply {
+        tabRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             setPadding(u(2.3f), u(1.2f), u(3.5f), u(0.6f))
@@ -521,13 +537,7 @@ class MainActivity : Activity() {
         if (show == headerShown) return
         headerShown = show
         val from = header.height
-        val to = if (show) {
-            header.measure(
-                View.MeasureSpec.makeMeasureSpec(header.width.takeIf { it > 0 } ?: screenW, View.MeasureSpec.EXACTLY),
-                View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
-            )
-            header.measuredHeight
-        } else 0
+        val to = if (show) welcomeHeight() else 0
         headerAnim?.cancel()
         headerAnim = ValueAnimator.ofInt(from, to).apply {
             duration = 320
@@ -538,15 +548,40 @@ class MainActivity : Activity() {
             }
             addListener(object : AnimatorListenerAdapter() {
                 override fun onAnimationEnd(animation: Animator) {
-                    if (headerShown) {
-                        header.layoutParams.height = WRAP_CONTENT
-                        header.requestLayout()
-                    }
+                    if (headerShown) fitWelcome()
                 }
             })
             start()
         }
         header.animate().alpha(if (show) 1f else 0f).setDuration(260).start()
+    }
+
+    /** All the screen above the tabs. */
+    private fun welcomeHeight(): Int {
+        val column = header.parent as View
+        val total = if (column.height > 0) column.height else screenH
+        val tabs = if (tabRow.height > 0) tabRow.height else tabRow.measuredHeight
+        return (total - tabs).coerceAtLeast(0)
+    }
+
+    private fun fitWelcome() {
+        if (!headerShown) return
+        val h = welcomeHeight()
+        if (header.layoutParams.height != h) {
+            header.layoutParams.height = h
+            header.requestLayout()
+        }
+    }
+
+    /** A dim picture of something to watch behind the welcome screen. */
+    private fun updateWelcomeBack() {
+        val item = stremioWatching.firstOrNull() ?: newMovies.firstOrNull() ?: newSeries.firstOrNull() ?: return
+        val url = "https://images.metahub.space/background/medium/${item.optString("id")}/img"
+        if (url == welcomeUrl) return
+        welcomeUrl = url
+        RemoteImages.load(url, welcomeBack, screenW / 2) { ok ->
+            if (ok) welcomeBack.animate().alpha(0.55f).setDuration(600).start()
+        }
     }
 
     private fun statusIcon(icon: Int) = ImageView(this).apply {
@@ -957,6 +992,7 @@ class MainActivity : Activity() {
                 newSeries = series
                 genreRows = genres
                 stremioVersion++
+                updateWelcomeBack()
                 loadApps(force = false)
             }
         }
@@ -1401,12 +1437,12 @@ class MainActivity : Activity() {
     // ---------- Music chip (top bar) ----------
 
     /** OK on the chip: play/pause what's playing, or open the music app when nothing is. */
-    /** Music player next to the greeting: cover, title and artist, previous / play / next. */
+    /** The welcome screen's music player: cover, title and artist, previous / play / next. */
     private fun buildMusicWidget(): View {
         musicBox = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(u(0.8f), u(0.8f), u(0.9f), u(0.8f))
+            setPadding(u(1.2f), u(1.2f), u(1.4f), u(1.2f))
             background = StateListDrawable().apply {
                 addState(intArrayOf(android.R.attr.state_focused), rounded(0x3322D3EE, u(1.2f).toFloat(), CYAN))
                 addState(intArrayOf(), rounded(0xCC12121D.toInt(), u(1.2f).toFloat(), VIOLET_DIM))
@@ -1422,15 +1458,15 @@ class MainActivity : Activity() {
             clipToOutline = true
             setImageResource(R.drawable.ic_m_music)
         }
-        musicBox.addView(musicArt, LinearLayout.LayoutParams(u(4.6f), u(4.6f)))
+        musicBox.addView(musicArt, LinearLayout.LayoutParams(u(8f), u(8f)))
         val info = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(u(0.8f), 0, u(0.4f), 0)
+            setPadding(u(1.4f), 0, u(0.6f), 0)
         }
-        musicTitle = text(1.25f, TEXT, bold = true).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
-        musicArtist = text(1.0f, MUTED).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
+        musicTitle = text(1.9f, TEXT, bold = true).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
+        musicArtist = text(1.4f, MUTED).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
         info.addView(musicTitle)
-        info.addView(musicArtist, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { topMargin = u(0.25f) })
+        info.addView(musicArtist, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { topMargin = u(0.5f) })
         musicBox.addView(info, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
         musicControls = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -1450,9 +1486,9 @@ class MainActivity : Activity() {
 
     private fun mediaButton(icon: Int, primary: Boolean, onClick: () -> Unit) = ImageView(this).apply {
         setImageResource(icon)
-        val size = u(if (primary) 2.9f else 2.4f)
-        layoutParams = LinearLayout.LayoutParams(size, size).apply { leftMargin = u(0.3f) }
-        setPadding(u(0.5f), u(0.5f), u(0.5f), u(0.5f))
+        val size = u(if (primary) 4.2f else 3.4f)
+        layoutParams = LinearLayout.LayoutParams(size, size).apply { leftMargin = u(0.6f) }
+        setPadding(u(0.8f), u(0.8f), u(0.8f), u(0.8f))
         isFocusable = true
         background = StateListDrawable().apply {
             addState(intArrayOf(android.R.attr.state_focused), rounded(if (primary) CYAN else 0x4422D3EE, size / 2f, CYAN))
