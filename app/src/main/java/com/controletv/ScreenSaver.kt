@@ -27,6 +27,13 @@ object ScreenSaver {
     /** How dark the photos get: 0.0 (none) to ~0.6. */
     fun dim(context: Context) = prefs(context).getFloat("dim", 0.35f)
 
+    /** Photos pulse and change with the beat of the music that's playing. */
+    fun followMusic(context: Context) = prefs(context).getBoolean("music", true)
+
+    fun setFollowMusic(context: Context, on: Boolean) {
+        prefs(context).edit().putBoolean("music", on).apply()
+    }
+
     fun configure(context: Context, enabled: Boolean?, minutes: Int?, dim: Float?) {
         prefs(context).edit().apply {
             enabled?.let { putBoolean("enabled", it) }

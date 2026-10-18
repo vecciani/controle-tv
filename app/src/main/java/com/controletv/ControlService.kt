@@ -46,6 +46,7 @@ class ControlService : Service() {
         Thread {
             var askedService = false
             var askedPhotos = false
+            var askedAudio = false
             while (true) {
                 Thread.sleep(10_000)
                 try {
@@ -55,6 +56,12 @@ class ControlService : Service() {
                         if (!askedPhotos && checkSelfPermission(android.Manifest.permission.READ_EXTERNAL_STORAGE) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
                             askedPhotos = true
                             Adb.shell("pm grant $packageName android.permission.READ_EXTERNAL_STORAGE")
+                        }
+                        // Following the beat of the music reads the sound output, which needs this permission
+                        if (!askedAudio && ScreenSaver.followMusic(this) &&
+                            checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                            askedAudio = true
+                            Adb.shell("pm grant $packageName android.permission.RECORD_AUDIO")
                         }
                     }
                     // Without the service we can't tell a film from an idle TV: better not start

@@ -775,6 +775,10 @@ class MainActivity : Activity() {
             card("rest:min", "Depois de $minutes min", "OK muda o tempo sem usar até ele começar", false, { it.setImageResource(R.drawable.ic_t_timer) }, iconTile = true) {
                 ScreenSaver.configure(this, null, REST_MINUTES.firstOrNull { it > minutes } ?: REST_MINUTES.first(), null); changed()
             },
+            card("rest:music", if (ScreenSaver.followMusic(this)) "Segue a música" else "Não segue a música",
+                "OK liga ou desliga: fotos pulsam e trocam na batida", false, { it.setImageResource(R.drawable.ic_m_music) }, iconTile = true) {
+                ScreenSaver.setFollowMusic(this, !ScreenSaver.followMusic(this)); changed()
+            },
             card("rest:dim", "Escurecer ${(dim * 100).roundToInt()}%", "OK muda o quanto as fotos escurecem", false, { it.setImageResource(R.drawable.ic_t_dim) }, iconTile = true) {
                 ScreenSaver.configure(this, null, null, REST_DIM.firstOrNull { it > dim + 0.01f } ?: REST_DIM.first()); changed()
             },

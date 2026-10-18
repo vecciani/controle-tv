@@ -23,6 +23,7 @@ import android.view.View
 import android.view.ViewGroup.LayoutParams.MATCH_PARENT
 import android.view.ViewGroup.LayoutParams.WRAP_CONTENT
 import android.view.ViewOutlineProvider
+import android.view.animation.DecelerateInterpolator
 import android.view.WindowManager
 import android.widget.FrameLayout
 import android.widget.ImageView
@@ -38,11 +39,15 @@ import kotlin.random.Random
 /**
  * The screensaver: the user's photos full screen with a slow zoom and pan, a big clock and
  * date, what's playing (art, title, artist) and a dark veil so it's easy on the eyes.
- * Any key wakes it up. After a while it lets the TV go to sleep normally.
+ * With music on, the photos pulse on the beat, a glow in the album's colour follows the bass
+ * and photos change on a beat. Any key wakes it up. After a while it lets the TV sleep normally.
  */
 class ScreenSaverActivity : Activity() {
     private val handler = Handler(Looper.getMainLooper())
     private val loader = Executors.newSingleThreadExecutor()
+    private lateinit var stage: FrameLayout
+    private lateinit var veil: View
+    private lateinit var glow: View
     private lateinit var front: ImageView
     private lateinit var back: ImageView
     private lateinit var clock: TextView
@@ -54,6 +59,11 @@ class ScreenSaverActivity : Activity() {
     private var photos: List<File> = emptyList()
     private var index = 0
     private var musicKey = ""
+    private var musicPlaying = false
+    private var pulse: MusicPulse? = null
+    private var lastPhotoAt = 0L
+    private var lastBeatAt = 0L
+    private var glowColor = 0xFF22D3EE.toInt()
 
     private val unit by lazy { resources.displayMetrics.widthPixels / 100f }
 
@@ -79,14 +89,22 @@ class ScreenSaverActivity : Activity() {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         val root = FrameLayout(this).apply { setBackgroundColor(Color.BLACK) }
 
+        // The two photos (for the crossfade) sit on a stage that pulses with the beat
+        stage = FrameLayout(this)
         back = photoView()
         front = photoView()
-        root.addView(back, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
-        root.addView(front, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+        stage.addView(back, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+        stage.addView(front, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+        root.addView(stage, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
 
-        // Dark veil over the photos ("lower the brightness"), plus a stronger gradient behind the text
-        root.addView(View(this).apply { setBackgroundColor(Color.argb((ScreenSaver.dim(this@ScreenSaverActivity) * 255).toInt(), 0, 0, 0)) },
-            FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+        // Dark veil over the photos ("lower the brightness"); it lifts a little on each beat
+        veil = View(this).apply { setBackgroundColor(Color.argb((ScreenSaver.dim(this@ScreenSaverActivity) * 255).toInt(), 0, 0, 0)) }
+        root.addView(veil, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+        // Glow from the bottom in the album's colour, following the bass
+        glow = View(this).apply { alpha = 0f }
+        setGlowColor(glowColor)
+        root.addView(glow, FrameLayout.LayoutParams(MATCH_PARENT, (resources.displayMetrics.heightPixels * 0.6f).toInt(), Gravity.BOTTOM))
+        // Stronger gradient behind the text
         root.addView(View(this).apply {
             background = GradientDrawable(GradientDrawable.Orientation.BOTTOM_TOP, intArrayOf(0xB3000000.toInt(), 0x00000000))
         }, FrameLayout.LayoutParams(MATCH_PARENT, (resources.displayMetrics.heightPixels * 0.45f).toInt(), Gravity.BOTTOM))
@@ -137,6 +155,67 @@ class ScreenSaverActivity : Activity() {
         }
         // After a while, let the TV fall asleep on its own schedule
         handler.postDelayed({ window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) }, KEEP_AWAKE_MS)
+        if (ScreenSaver.followMusic(this)) startPulse()
+    }
+
+    // ---------- Following the music ----------
+
+    private fun startPulse() {
+        val p = MusicPulse { level, beat -> onMusicFrame(level, beat) }
+        if (p.start(this)) { pulse = p; return }
+        // No permission yet: ask through the phone's ADB connection, then try once more
+        if (Adb.state != Adb.State.OK) return
+        loader.execute {
+            runCatching { Adb.shell("pm grant $packageName android.permission.RECORD_AUDIO") }
+            runOnUiThread { if (!isFinishing && p.start(this)) pulse = p }
+        }
+    }
+
+    private fun onMusicFrame(level: Float, beat: Float) {
+        if (!musicPlaying) {
+            if (glow.alpha > 0f) glow.alpha = (glow.alpha - 0.05f).coerceAtLeast(0f)
+            return
+        }
+        glow.alpha = (level * 0.55f).coerceIn(0f, 0.55f)
+        if (beat <= 0f) return
+        lastBeatAt = System.currentTimeMillis()
+        // Punch: the photo jumps a little closer and settles; the veil lifts for a moment
+        val bump = 1f + 0.035f * beat
+        stage.animate().cancel()
+        stage.scaleX = bump
+        stage.scaleY = bump
+        stage.animate().scaleX(1f).scaleY(1f).setDuration(280).setInterpolator(DecelerateInterpolator()).start()
+        veil.animate().cancel()
+        veil.alpha = 1f - 0.45f * beat
+        veil.animate().alpha(1f).setDuration(320).start()
+        if (music.visibility == View.VISIBLE) {
+            musicArt.animate().cancel()
+            musicArt.scaleX = 1f + 0.08f * beat
+            musicArt.scaleY = 1f + 0.08f * beat
+            musicArt.animate().scaleX(1f).scaleY(1f).setDuration(240).start()
+        }
+        // Change photo on a beat once it's been up for a while
+        if (photos.size > 1 && System.currentTimeMillis() - lastPhotoAt > BEAT_PHOTO_MS) {
+            handler.removeCallbacks(nextPhoto)
+            showNext(onBeat = true)
+            handler.postDelayed(nextPhoto, PHOTO_MS)
+        }
+    }
+
+    private fun setGlowColor(color: Int) {
+        glowColor = color
+        glow.background = GradientDrawable(GradientDrawable.Orientation.BOTTOM_TOP,
+            intArrayOf(Color.argb(200, Color.red(color), Color.green(color), Color.blue(color)), Color.argb(70, Color.red(color), Color.green(color), Color.blue(color)), 0))
+    }
+
+    /** The album art's average colour, made bright enough to glow. */
+    private fun glowFrom(art: Bitmap): Int {
+        val avg = Bitmap.createScaledBitmap(art, 1, 1, true).getPixel(0, 0)
+        val hsv = FloatArray(3)
+        Color.colorToHSV(avg, hsv)
+        hsv[1] = (hsv[1] * 1.4f).coerceIn(0.45f, 1f)
+        hsv[2] = hsv[2].coerceAtLeast(0.85f)
+        return Color.HSVToColor(hsv)
     }
 
     override fun onResume() {
@@ -154,6 +233,7 @@ class ScreenSaverActivity : Activity() {
     }
 
     override fun onDestroy() {
+        pulse?.stop()
         handler.removeCallbacksAndMessages(null)
         loader.shutdownNow()
         ScreenSaver.touch()
@@ -178,10 +258,13 @@ class ScreenSaverActivity : Activity() {
         alpha = 0f
     }
 
-    private fun showNext() {
+    private fun showNext(onBeat: Boolean = false) {
         if (photos.isEmpty()) return
         val file = photos[index % photos.size]
         index++
+        lastPhotoAt = System.currentTimeMillis()
+        // On the beat the change is quicker, closer to a cut
+        val fade = if (onBeat) BEAT_FADE_MS else FADE_MS
         loader.execute {
             val bitmap = runCatching { decode(file) }.getOrNull() ?: return@execute
             runOnUiThread {
@@ -193,15 +276,8 @@ class ScreenSaverActivity : Activity() {
                 incoming.setImageBitmap(bitmap)
                 incoming.bringToFront()
                 kenBurns(incoming)
-                incoming.animate().alpha(1f).setDuration(FADE_MS).start()
-                back.animate().alpha(0f).setDuration(FADE_MS).start()
-                // Keep the text layers above the photos
-                (incoming.parent as FrameLayout).let { parent ->
-                    for (i in 0 until parent.childCount) {
-                        val child = parent.getChildAt(i)
-                        if (child !== front && child !== back) child.bringToFront()
-                    }
-                }
+                incoming.animate().alpha(1f).setDuration(fade).start()
+                back.animate().alpha(0f).setDuration(fade).start()
             }
         }
     }
@@ -259,6 +335,7 @@ class ScreenSaverActivity : Activity() {
         val controller = MediaListener.current(this)
         val meta = controller?.metadata
         val playing = controller?.playbackState?.state == PlaybackState.STATE_PLAYING
+        musicPlaying = meta != null && playing
         if (meta == null || !playing) {
             music.visibility = View.GONE
             musicKey = ""
@@ -273,6 +350,7 @@ class ScreenSaverActivity : Activity() {
         musicTitle.text = title
         musicArtist.text = artist
         if (art != null) musicArt.setImageBitmap(art) else musicArt.setImageResource(R.drawable.ic_m_music)
+        setGlowColor(art?.let { runCatching { glowFrom(it) }.getOrNull() } ?: 0xFF22D3EE.toInt())
         music.visibility = View.VISIBLE
     }
 
@@ -294,6 +372,9 @@ class ScreenSaverActivity : Activity() {
 
         private const val PHOTO_MS = 12_000L
         private const val FADE_MS = 1_500L
+        private const val BEAT_FADE_MS = 450L
+        /** With music on, a photo stays at least this long before a beat changes it. */
+        private const val BEAT_PHOTO_MS = 8_000L
         private const val KEEP_AWAKE_MS = 30 * 60_000L
     }
 }
