@@ -236,6 +236,8 @@ class ControlServer(
                 ok()
             }
 
+            path == "/api/debug/system" -> ok(SystemShortcuts.report(context))
+
             path == "/api/stremio" -> ok(Stremio.status(context))
 
             path == "/api/stremio/login" && post -> {

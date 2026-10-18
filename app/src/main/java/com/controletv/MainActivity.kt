@@ -104,6 +104,7 @@ class MainActivity : Activity() {
     private var stremioLibrary: List<org.json.JSONObject> = emptyList()
     private var newMovies: List<org.json.JSONObject> = emptyList()
     private var newSeries: List<org.json.JSONObject> = emptyList()
+    private var genreRows: List<Pair<String, List<org.json.JSONObject>>> = emptyList()
     private var stremioFetchedAt = 0L
     private var stremioVersion = 0
     private var shownUrl: String? = null
@@ -337,6 +338,7 @@ class MainActivity : Activity() {
                 // Then new films and series, and the Stremio library
                 if (newMovies.isNotEmpty()) rows.addView(row("Filmes novos", newMovies.take(20).map { stremioPoster(it) }))
                 if (newSeries.isNotEmpty()) rows.addView(row("Séries novas", newSeries.take(20).map { stremioPoster(it) }))
+                genreRows.forEach { (title, items) -> if (items.isNotEmpty()) rows.addView(row(title, items.take(20).map { stremioPoster(it) })) }
                 if (stremioLibrary.isNotEmpty()) rows.addView(row("Minha biblioteca do Stremio", stremioLibrary.take(30).map { stremioPoster(it) }))
                 val history = WatchHistory.list(this)
                 val watchNext = WatchNext.entries()
@@ -350,6 +352,14 @@ class MainActivity : Activity() {
                     val folder = Folders.ALL.first { it.id == id }
                     val inFolder = sorted[id].orEmpty()
                     if (inFolder.isNotEmpty()) rows.addView(row(folder.title, inFolder.map { appCard(it, it.pkg in favorites, folder.title) }))
+                }
+                val inputs = SystemShortcuts.inputs(this)
+                if (inputs.isNotEmpty()) {
+                    rows.addView(row("Entradas", inputs.map { input ->
+                        card("in:${input.id}", input.label, "Entrada da TV", false, { it.setImageResource(R.drawable.ic_t_display) }, iconTile = true) {
+                            if (!SystemShortcuts.openInput(this, input)) toast("Não deu para trocar para ${input.label}")
+                        }
+                    }))
                 }
                 rows.addView(row("Configurações", settingsTiles()))
                 val target = focused?.let { rowsScroll.findViewWithTag<View>(it) } ?: featuredRow.getChildAt(0) ?: firstCard()
@@ -424,6 +434,12 @@ class MainActivity : Activity() {
             fun catalog(type: String) = runCatching { Stremio.newReleases(type, year) }.getOrDefault(emptyList())
             val movies = catalog("movie")
             val series = catalog("series")
+            // Genre rows mix films and series, alternating
+            val genres = GENRES.map { (title, genre) ->
+                val m = runCatching { Stremio.genre("movie", genre) }.getOrDefault(emptyList())
+                val t = runCatching { Stremio.genre("series", genre) }.getOrDefault(emptyList())
+                title to (0 until maxOf(m.size, t.size)).flatMap { i -> listOfNotNull(m.getOrNull(i), t.getOrNull(i)) }
+            }
             runOnUiThread {
                 stremioLoggedIn = loggedIn
                 stremioLibrary = items
@@ -433,6 +449,7 @@ class MainActivity : Activity() {
                 }
                 newMovies = movies
                 newSeries = series
+                genreRows = genres
                 stremioVersion++
                 loadApps(force = false)
             }
@@ -679,19 +696,17 @@ class MainActivity : Activity() {
     /** Fire TV's own screens, as on the Amazon home. Shortcuts the TV doesn't have are left out. */
     private fun settingsTiles(): List<View> {
         val tiles = mutableListOf<View>()
-        fun add(key: String, title: String, icon: Int, intent: Intent) {
-            if (intent.resolveActivity(packageManager) == null) return
-            tiles += card(key, title, "Configurações da TV", false, { it.setImageResource(icon) }, iconTile = true) {
-                runCatching { startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
-                    .onFailure { toast("Esta TV não abriu essa tela") }
+        // Always shown: each one tries several ways into Fire TV's settings app until one opens
+        SystemShortcuts.SETTINGS.forEach { shortcut ->
+            tiles += card(shortcut.key, shortcut.title, "Configurações da TV", false, { it.setImageResource(shortcut.icon) }, iconTile = true) {
+                if (!SystemShortcuts.open(this, shortcut)) toast("Esta TV não abriu essa tela. Veja o diagnóstico nos Ajustes do celular.")
             }
         }
-        add("set:all", "Configurações", R.drawable.ic_t_settings, Intent(Settings.ACTION_SETTINGS))
-        add("set:net", "Rede e Wi-Fi", R.drawable.ic_t_wifi, Intent(Settings.ACTION_WIFI_SETTINGS))
-        add("set:display", "Tela e som", R.drawable.ic_t_display, Intent(Settings.ACTION_DISPLAY_SETTINGS))
-        add("set:bt", "Controles e Bluetooth", R.drawable.ic_t_bluetooth, Intent(Settings.ACTION_BLUETOOTH_SETTINGS))
-        add("set:apps", "Gerenciar apps", R.drawable.ic_t_apps, Intent(Settings.ACTION_MANAGE_APPLICATIONS_SETTINGS))
-        packageManager.getLaunchIntentForPackage("com.amazon.venezia")?.let { add("set:store", "Loja de apps", R.drawable.ic_t_store, it) }
+        packageManager.getLaunchIntentForPackage("com.amazon.venezia")?.let { store ->
+            tiles += card("set:store", "Loja de apps", "Amazon Appstore", false, { it.setImageResource(R.drawable.ic_t_store) }, iconTile = true) {
+                runCatching { startActivity(store.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }.onFailure { toast("A loja não abriu") }
+            }
+        }
         tiles += card("set:hidden", "Apps escondidos", "Apps tirados da tela inicial", false, { it.setImageResource(R.drawable.ic_t_apps) }, iconTile = true) {
             hiddenApps()
         }
@@ -1164,6 +1179,9 @@ class MainActivity : Activity() {
         @Volatile
         var visible = false
             private set
+
+        /** Genre rows on the home (title shown, Stremio genre name). */
+        private val GENRES = listOf("Comédia" to "Comedy", "Ficção científica" to "Sci-Fi", "Drama" to "Drama")
 
         /** App artwork, kept in memory so going back home never reloads it. */
         private val icons = ConcurrentHashMap<String, Drawable>()

@@ -757,6 +757,7 @@ function settingsSheet() {
       <button class="sheet-btn${s.homeLauncher ? ' primary' : ''}" id="s-home">${icon('house')}${s.homeLauncher ? 'Controle TV é a tela inicial (desligar)' : 'Usar o Controle TV como tela inicial'}</button>
       <button class="sheet-btn" id="s-name">${icon('pencil')}Nome na tela da TV: <span id="s-name-value"></span></button>
       <button class="sheet-btn" id="s-saver">${icon('image')}Tela de descanso</button>
+      <button class="sheet-btn" id="s-system">${icon('search')}Diagnóstico das configurações da TV</button>
       <button class="sheet-btn" id="s-player">${icon('play')}Player da TV</button>
       <button class="sheet-btn" id="s-pin">${icon('lock')}${s.requirePin ? 'Parar de pedir PIN' : 'Pedir PIN para novos celulares'}</button>
       ${native?.updateTv ? `<button class="sheet-btn primary" id="s-update-tv">${icon('download')}Atualizar a TV pelo celular</button>` : ''}
@@ -787,6 +788,19 @@ function settingsSheet() {
   sheetButton(sheet, 's-probe', probeSheet);
   sheetButton(sheet, 's-player', playerSheet);
   sheetButton(sheet, 's-saver', screensaverSheet);
+  sheetButton(sheet, 's-system', async () => {
+    const report = openSheet(`
+      <div class="sheet-head"><div><h3>Configurações e entradas da TV</h3><p>Mande um print disto se algum atalho não abrir</p></div></div>
+      <pre class="report" id="s-system-report">Lendo…</pre>
+      <div class="sheet-actions"><button class="sheet-btn" id="s-system-close">${icon('x')}Fechar</button></div>`);
+    sheetButton(report, 's-system-close', settingsSheet);
+    try {
+      const r = await api('/api/debug/system');
+      report.querySelector('#s-system-report').textContent =
+        `App de configurações: ${r.settingsPackage || 'nenhum'}\n\nAtalhos padrão:\n${r.standard.join('\n')}\n\n` +
+        `Entradas (${r.inputs.length}):\n${r.inputs.join('\n') || 'nenhuma'}\n\nTelas do app de configurações (${r.screens.length}):\n${r.screens.join('\n')}`;
+    } catch (e) { report.querySelector('#s-system-report').textContent = e.message; }
+  });
   const nameValue = sheet.querySelector('#s-name-value');
   if (nameValue) nameValue.textContent = s.homeName || '–';
   sheetButton(sheet, 's-name', () => {

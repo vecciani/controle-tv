@@ -72,6 +72,13 @@ object Stremio {
         return get("$CATALOG/catalog/$safeType/$path.json").optJSONArray("metas") ?: JSONArray()
     }
 
+    /** Popular titles of a genre (Stremio's genre names are in English: Comedy, Sci-Fi, Drama…). */
+    fun genre(type: String, genre: String): List<JSONObject> {
+        val safeType = if (type == "series") "series" else "movie"
+        val metas = get("$CATALOG/catalog/$safeType/top/genre=${URLEncoder.encode(genre, "UTF-8")}.json").optJSONArray("metas") ?: JSONArray()
+        return List(metas.length()) { metas.getJSONObject(it) }
+    }
+
     /** This year's releases ("Filmes novos", "Séries novas"), as plain objects. */
     fun newReleases(type: String, year: Int): List<JSONObject> {
         val safeType = if (type == "series") "series" else "movie"
