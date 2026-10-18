@@ -381,15 +381,21 @@ class MainActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             clipChildren = false
             clipToPadding = false
-            setPadding(0, 0, 0, (screenH * 0.45f).toInt())
+            // Side padding here (not on the scroll view) so a focused card's zoom and ring reach the screen edge
+            setPadding(u(3.5f), u(0.6f), u(3.5f), (screenH * 0.45f).toInt())
         }
-        // Clipped to its own area so rows scrolled up don't draw over the hero
+        // Full screen width, so only its top edge cuts: rows scrolled up don't draw over the hero,
+        // and the focused card's zoom isn't cut at the sides
         rowsScroll = RowsScrollView(this).apply {
             isVerticalScrollBarEnabled = false
             isSmoothScrollingEnabled = true
             addView(rows)
         }
-        content.addView(rowsScroll, LinearLayout.LayoutParams(MATCH_PARENT, 0, 1f).apply { topMargin = u(0.8f) })
+        content.addView(rowsScroll, LinearLayout.LayoutParams(MATCH_PARENT, 0, 1f).apply {
+            topMargin = u(0.4f)
+            leftMargin = -u(3.5f)
+            rightMargin = -u(3.5f)
+        })
         root.addView(content, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
 
         updateButton = Button(this).apply {
@@ -444,7 +450,7 @@ class MainActivity : Activity() {
 
     /** Slides the row holding [view] up to the top of the rows area, Netflix style. */
     private fun bringRowToTop(view: View) {
-        rowOf(view)?.let { rowsScroll.smoothScrollTo(0, it.top) }
+        rowOf(view)?.let { rowsScroll.smoothScrollTo(0, it.top - rows.paddingTop) }
     }
 
     /** The row (direct child of [rows]) holding [view], or null when it's elsewhere. */

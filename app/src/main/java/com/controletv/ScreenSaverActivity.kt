@@ -23,7 +23,12 @@ import android.view.View
 import android.view.ViewGroup.LayoutParams.MATCH_PARENT
 import android.view.ViewGroup.LayoutParams.WRAP_CONTENT
 import android.view.ViewOutlineProvider
-import android.view.animation.DecelerateInterpolator
+import android.animation.TimeAnimator
+import android.view.ViewAnimationUtils
+import android.view.animation.AccelerateDecelerateInterpolator
+import android.view.animation.AccelerateInterpolator
+import kotlin.math.exp
+import kotlin.math.hypot
 import android.view.WindowManager
 import android.widget.FrameLayout
 import android.widget.ImageView
@@ -39,8 +44,10 @@ import kotlin.random.Random
 /**
  * The screensaver: the user's photos full screen with a slow zoom and pan, a big clock and
  * date, what's playing (art, title, artist) and a dark veil so it's easy on the eyes.
- * With music on, the photos pulse on the beat, a glow in the album's colour follows the bass
- * and photos change on a beat. Any key wakes it up. After a while it lets the TV sleep normally.
+ * With music on, everything flows with the song: the photo breathes with the loudness, a soft
+ * light in the album's colour follows the melody (higher notes drift it right and up), and
+ * photos change at the start of a bar with a transition that fits the moment (slow dissolve
+ * when calm, a dive when it builds, a circular reveal on a chorus). Any key wakes it up.
  */
 class ScreenSaverActivity : Activity() {
     private val handler = Handler(Looper.getMainLooper())
@@ -48,6 +55,7 @@ class ScreenSaverActivity : Activity() {
     private lateinit var stage: FrameLayout
     private lateinit var veil: View
     private lateinit var glow: View
+    private lateinit var light: View
     private lateinit var front: ImageView
     private lateinit var back: ImageView
     private lateinit var clock: TextView
@@ -62,7 +70,21 @@ class ScreenSaverActivity : Activity() {
     private var musicPlaying = false
     private var pulse: MusicPulse? = null
     private var lastPhotoAt = 0L
-    private var lastBeatAt = 0L
+    private var beatsSincePhoto = 0
+    private var beatMs: Long? = null
+    // Effects glide from where they are towards these (see step)
+    private var targetBreath = 0f
+    private var targetLight = 0f
+    private var targetPitch = 0.5f
+    private var breath = 0f
+    private var lightLevel = 0f
+    private var pitch = 0.5f
+    private var pop = 0f
+    private val screenW by lazy { resources.displayMetrics.widthPixels }
+    private val screenH by lazy { resources.displayMetrics.heightPixels }
+    private val lightSize by lazy { (screenW * 0.75f).toInt() }
+
+    private enum class Transition { DISSOLVE, ZOOM, REVEAL }
     private var glowColor = 0xFF22D3EE.toInt()
 
     private val unit by lazy { resources.displayMetrics.widthPixels / 100f }
@@ -100,7 +122,9 @@ class ScreenSaverActivity : Activity() {
         // Dark veil over the photos ("lower the brightness"); it lifts a little on each beat
         veil = View(this).apply { setBackgroundColor(Color.argb((ScreenSaver.dim(this@ScreenSaverActivity) * 255).toInt(), 0, 0, 0)) }
         root.addView(veil, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
-        // Glow from the bottom in the album's colour, following the bass
+        // A soft light in the album's colour that follows the melody, and a glow from the bottom
+        light = View(this).apply { alpha = 0f }
+        root.addView(light, FrameLayout.LayoutParams(lightSize, lightSize, Gravity.CENTER))
         glow = View(this).apply { alpha = 0f }
         setGlowColor(glowColor)
         root.addView(glow, FrameLayout.LayoutParams(MATCH_PARENT, (resources.displayMetrics.heightPixels * 0.6f).toInt(), Gravity.BOTTOM))
@@ -161,51 +185,90 @@ class ScreenSaverActivity : Activity() {
     // ---------- Following the music ----------
 
     private fun startPulse() {
-        val p = MusicPulse { level, beat -> onMusicFrame(level, beat) }
-        if (p.start(this)) { pulse = p; return }
+        val p = MusicPulse { onMusicFrame(it) }
+        if (p.start(this)) { pulse = p; motion.start(); return }
         // No permission yet: ask through the phone's ADB connection, then try once more
         if (Adb.state != Adb.State.OK) return
         loader.execute {
             runCatching { Adb.shell("pm grant $packageName android.permission.RECORD_AUDIO") }
-            runOnUiThread { if (!isFinishing && p.start(this)) pulse = p }
+            runOnUiThread { if (!isFinishing && p.start(this)) { pulse = p; motion.start() } }
         }
     }
 
-    private fun onMusicFrame(level: Float, beat: Float) {
-        if (!musicPlaying) {
-            if (glow.alpha > 0f) glow.alpha = (glow.alpha - 0.05f).coerceAtLeast(0f)
-            return
-        }
-        glow.alpha = (level * 0.55f).coerceIn(0f, 0.55f)
-        if (beat <= 0f) return
-        lastBeatAt = System.currentTimeMillis()
-        // Punch: the photo jumps a little closer and settles; the veil lifts for a moment
-        val bump = 1f + 0.035f * beat
-        stage.animate().cancel()
-        stage.scaleX = bump
-        stage.scaleY = bump
-        stage.animate().scaleX(1f).scaleY(1f).setDuration(280).setInterpolator(DecelerateInterpolator()).start()
-        veil.animate().cancel()
-        veil.alpha = 1f - 0.45f * beat
-        veil.animate().alpha(1f).setDuration(320).start()
+    /** ~20 times a second: where the effects should head, and whether it's time for a new photo. */
+    private fun onMusicFrame(f: MusicAnalyzer.Frame) {
+        targetBreath = if (musicPlaying) f.loudness else 0f
+        targetLight = if (musicPlaying) f.melody else 0f
+        targetPitch = f.pitch
+        if (!musicPlaying) return
+        if (f.onset > 0f) pop = maxOf(pop, f.onset)
+        f.beatMs?.let { beatMs = it }
+        if (f.beat > 0f) beatsSincePhoto++
+        if (photos.size < 2) return
+        val shown = System.currentTimeMillis() - lastPhotoAt
+        val transition = when {
+            // Chorus or drop: change right away, revealed from the light
+            f.section && shown > 4_000 -> Transition.REVEAL
+            // Steady beat: change at the start of a bar (every 4 beats)
+            f.beat > 0f && f.beatMs != null && beatsSincePhoto % 4 == 0 && shown > PHRASE_MS -> transitionFor(f.loudness)
+            // No clear beat (calm songs): change on a new note
+            f.beatMs == null && f.onset > 0f && shown > PHRASE_MS + 3_000 -> transitionFor(f.loudness)
+            else -> null
+        } ?: return
+        handler.removeCallbacks(nextPhoto)
+        showNext(transition)
+        handler.postDelayed(nextPhoto, PHOTO_MS)
+    }
+
+    private fun transitionFor(loudness: Float) = when {
+        loudness < 0.35f -> Transition.DISSOLVE
+        loudness < 0.7f -> Transition.ZOOM
+        else -> if (Random.nextBoolean()) Transition.ZOOM else Transition.REVEAL
+    }
+
+    /** Every screen frame: glide the effects towards the music, so nothing jumps. */
+    private val motion = TimeAnimator().apply {
+        setTimeListener { _, _, dt -> step(dt.coerceIn(1, 100).toFloat()) }
+    }
+
+    private fun step(dt: Float) {
+        val quick = 1f - exp(-dt / 140f)
+        val slow = 1f - exp(-dt / 450f)
+        breath += (targetBreath - breath) * quick
+        lightLevel += (targetLight - lightLevel) * quick
+        pitch += (targetPitch - pitch) * slow
+        pop *= exp(-dt / 380f)
+
+        // The photo breathes with the loudness
+        val s = 1f + 0.03f * breath
+        stage.scaleX = s
+        stage.scaleY = s
+        // The veil lifts as the melody grows; the bottom glow follows the loudness
+        veil.alpha = 1f - 0.3f * lightLevel
+        glow.alpha = 0.45f * breath
+        // A soft light follows the melody: right and up for high notes, left and down for low ones,
+        // stronger as the melody grows and swelling a little on each new note
+        light.alpha = (0.2f * lightLevel + 0.5f * lightLevel * lightLevel + 0.25f * pop).coerceIn(0f, 0.85f)
+        light.translationX = (pitch - 0.5f) * screenW * 0.7f
+        light.translationY = screenH * (0.15f - 0.3f * pitch)
+        val ls = 0.85f + 0.3f * lightLevel + 0.15f * pop
+        light.scaleX = ls
+        light.scaleY = ls
         if (music.visibility == View.VISIBLE) {
-            musicArt.animate().cancel()
-            musicArt.scaleX = 1f + 0.08f * beat
-            musicArt.scaleY = 1f + 0.08f * beat
-            musicArt.animate().scaleX(1f).scaleY(1f).setDuration(240).start()
-        }
-        // Change photo on a beat once it's been up for a while
-        if (photos.size > 1 && System.currentTimeMillis() - lastPhotoAt > BEAT_PHOTO_MS) {
-            handler.removeCallbacks(nextPhoto)
-            showNext(onBeat = true)
-            handler.postDelayed(nextPhoto, PHOTO_MS)
+            musicArt.scaleX = 1f + 0.05f * breath + 0.04f * pop
+            musicArt.scaleY = musicArt.scaleX
         }
     }
 
     private fun setGlowColor(color: Int) {
         glowColor = color
-        glow.background = GradientDrawable(GradientDrawable.Orientation.BOTTOM_TOP,
-            intArrayOf(Color.argb(200, Color.red(color), Color.green(color), Color.blue(color)), Color.argb(70, Color.red(color), Color.green(color), Color.blue(color)), 0))
+        fun tint(alpha: Int) = Color.argb(alpha, Color.red(color), Color.green(color), Color.blue(color))
+        glow.background = GradientDrawable(GradientDrawable.Orientation.BOTTOM_TOP, intArrayOf(tint(200), tint(70), 0))
+        light.background = GradientDrawable().apply {
+            gradientType = GradientDrawable.RADIAL_GRADIENT
+            gradientRadius = lightSize / 2f
+            colors = intArrayOf(tint(170), tint(60), 0)
+        }
     }
 
     /** The album art's average colour, made bright enough to glow. */
@@ -233,6 +296,7 @@ class ScreenSaverActivity : Activity() {
     }
 
     override fun onDestroy() {
+        motion.cancel()
         pulse?.stop()
         handler.removeCallbacksAndMessages(null)
         loader.shutdownNow()
@@ -258,13 +322,20 @@ class ScreenSaverActivity : Activity() {
         alpha = 0f
     }
 
-    private fun showNext(onBeat: Boolean = false) {
+    private fun showNext(transition: Transition? = null) {
         if (photos.isEmpty()) return
         val file = photos[index % photos.size]
         index++
         lastPhotoAt = System.currentTimeMillis()
-        // On the beat the change is quicker, closer to a cut
-        val fade = if (onBeat) BEAT_FADE_MS else FADE_MS
+        beatsSincePhoto = 0
+        // With music, transitions last a whole number of beats
+        val beat = beatMs ?: 600L
+        val duration = when (transition) {
+            null -> FADE_MS
+            Transition.DISSOLVE -> (beat * 4).coerceIn(1_800, 3_500)
+            Transition.ZOOM -> (beat * 2).coerceIn(700, 1_400)
+            Transition.REVEAL -> (beat * 2).coerceIn(600, 1_200)
+        }
         loader.execute {
             val bitmap = runCatching { decode(file) }.getOrNull() ?: return@execute
             runOnUiThread {
@@ -275,9 +346,36 @@ class ScreenSaverActivity : Activity() {
                 front = incoming
                 incoming.setImageBitmap(bitmap)
                 incoming.bringToFront()
+                val outgoing = back
+                // Delays and curves stick to a view's animator: reset them from the last transition
+                for (v in listOf(incoming, outgoing)) v.animate().setStartDelay(0).setInterpolator(null)
                 kenBurns(incoming)
-                incoming.animate().alpha(1f).setDuration(fade).start()
-                back.animate().alpha(0f).setDuration(fade).start()
+                when (transition) {
+                    Transition.ZOOM -> {
+                        // Dive through: the old photo rushes towards you and fades as the new one appears
+                        outgoing.animate().scaleX(outgoing.scaleX * 1.3f).scaleY(outgoing.scaleY * 1.3f).alpha(0f)
+                            .setDuration(duration).setInterpolator(AccelerateInterpolator()).start()
+                        incoming.animate().alpha(1f).setDuration(duration * 3 / 4).setStartDelay(duration / 4).start()
+                    }
+                    Transition.REVEAL -> {
+                        // Opens in a circle from where the light is
+                        incoming.alpha = 1f
+                        val cx = (screenW / 2 + light.translationX).toInt().coerceIn(0, screenW)
+                        val cy = (screenH / 2 + light.translationY).toInt().coerceIn(0, screenH)
+                        val radius = hypot(screenW.toFloat(), screenH.toFloat())
+                        runCatching {
+                            ViewAnimationUtils.createCircularReveal(incoming, cx, cy, 0f, radius).apply {
+                                this.duration = duration
+                                interpolator = AccelerateDecelerateInterpolator()
+                            }.start()
+                        }
+                        outgoing.animate().alpha(0f).setStartDelay(duration).setDuration(200).start()
+                    }
+                    else -> {
+                        incoming.animate().alpha(1f).setDuration(duration).start()
+                        outgoing.animate().alpha(0f).setDuration(duration).start()
+                    }
+                }
             }
         }
     }
@@ -372,9 +470,8 @@ class ScreenSaverActivity : Activity() {
 
         private const val PHOTO_MS = 12_000L
         private const val FADE_MS = 1_500L
-        private const val BEAT_FADE_MS = 450L
-        /** With music on, a photo stays at least this long before a beat changes it. */
-        private const val BEAT_PHOTO_MS = 8_000L
+        /** With music on, a photo stays at least this long, then changes at the start of a bar. */
+        private const val PHRASE_MS = 9_000L
         private const val KEEP_AWAKE_MS = 30 * 60_000L
     }
 }
