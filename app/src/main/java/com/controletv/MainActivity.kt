@@ -90,7 +90,10 @@ class MainActivity : Activity() {
     private lateinit var backBack: ImageView
     private lateinit var heroLogo: ImageView
     private lateinit var heroTitle: TextView
+    private lateinit var heroImdb: TextView
     private lateinit var heroMeta: TextView
+    private lateinit var heroAwards: TextView
+    private lateinit var heroCredits: TextView
     private lateinit var heroDesc: TextView
     private lateinit var heroHint: TextView
     private var heroKey = ""
@@ -122,6 +125,7 @@ class MainActivity : Activity() {
 
     private val unit by lazy { resources.displayMetrics.widthPixels / 100f } // 1% of screen width
     private val screenH by lazy { resources.displayMetrics.heightPixels }
+    private val screenW by lazy { resources.displayMetrics.widthPixels }
 
     private val packages = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) = loadApps(force = true)
@@ -179,21 +183,29 @@ class MainActivity : Activity() {
     private fun buildScreen(): View {
         val root = FrameLayout(this).apply { background = NeonBackground() }
 
-        // Backdrop of the focused title (two layers for a crossfade), darkened towards the
-        // left and the bottom so the text and the rows stay readable
+        // Backdrop of the focused title, Netflix style: only the top right of the screen,
+        // dimmed a little and faded into the background on its left and bottom edges, so the
+        // text and the rows always sit on dark. Two layers for a crossfade.
+        val backW = (screenW * 0.70f).toInt()
+        val backH = (screenH * 0.70f).toInt()
+        val backdrop = FrameLayout(this)
         backBack = backdropView()
         backFront = backdropView()
-        root.addView(backBack, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
-        root.addView(backFront, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+        backdrop.addView(backBack, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+        backdrop.addView(backFront, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+        root.addView(backdrop, FrameLayout.LayoutParams(backW, backH, Gravity.TOP or Gravity.END))
+        root.addView(View(this).apply { setBackgroundColor(0x4007070C) },
+            FrameLayout.LayoutParams(backW, backH, Gravity.TOP or Gravity.END))
         root.addView(View(this).apply {
-            background = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT, intArrayOf(0xF207070C.toInt(), 0xB307070C.toInt(), 0x0007070C))
-        }, FrameLayout.LayoutParams((resources.displayMetrics.widthPixels * 0.75f).toInt(), MATCH_PARENT))
+            background = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT, intArrayOf(0xFF07070C.toInt(), 0xD907070C.toInt(), 0x6607070C, 0x0007070C))
+        }, FrameLayout.LayoutParams((backW * 0.6f).toInt(), backH, Gravity.TOP or Gravity.START).apply { leftMargin = screenW - backW })
+        val fadeH = (backH * 0.55f).toInt()
         root.addView(View(this).apply {
-            background = GradientDrawable(GradientDrawable.Orientation.BOTTOM_TOP, intArrayOf(0xFF07070C.toInt(), 0xF207070C.toInt(), 0x0007070C))
-        }, FrameLayout.LayoutParams(MATCH_PARENT, (screenH * 0.62f).toInt(), Gravity.BOTTOM))
+            background = GradientDrawable(GradientDrawable.Orientation.BOTTOM_TOP, intArrayOf(0xFF07070C.toInt(), 0xD907070C.toInt(), 0x0007070C))
+        }, FrameLayout.LayoutParams(backW, fadeH, Gravity.TOP or Gravity.END).apply { topMargin = backH - fadeH })
         root.addView(View(this).apply {
             background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(0xB307070C.toInt(), 0x0007070C))
-        }, FrameLayout.LayoutParams(MATCH_PARENT, (screenH * 0.18f).toInt(), Gravity.TOP))
+        }, FrameLayout.LayoutParams(MATCH_PARENT, (screenH * 0.16f).toInt(), Gravity.TOP))
 
         val content = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -243,7 +255,7 @@ class MainActivity : Activity() {
             adjustViewBounds = true
             visibility = View.GONE
         }
-        hero.addView(heroLogo, LinearLayout.LayoutParams(u(30f), (screenH * 0.13f).toInt()))
+        hero.addView(heroLogo, LinearLayout.LayoutParams(u(28f), (screenH * 0.11f).toInt()))
         heroTitle = text(3.6f, TEXT, bold = true).apply {
             maxLines = 2
             ellipsize = TextUtils.TruncateAt.END
@@ -251,17 +263,39 @@ class MainActivity : Activity() {
             setShadowLayer(u(0.8f).toFloat(), 0f, 0f, 0xAA000000.toInt())
         }
         hero.addView(heroTitle, LinearLayout.LayoutParams(u(48f), WRAP_CONTENT))
-        heroMeta = text(1.3f, 0xE6F2F2F7.toInt(), bold = true).apply { compoundDrawablePadding = u(0.5f) }
-        hero.addView(heroMeta, LinearLayout.LayoutParams(u(55f), WRAP_CONTENT).apply { topMargin = u(0.9f) })
+        // IMDb rating badge, then year · length · kind · genres
+        val metaRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        heroImdb = text(1.35f, TEXT, bold = true).apply {
+            compoundDrawablePadding = u(0.5f)
+            visibility = View.GONE
+        }
+        metaRow.addView(heroImdb, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { rightMargin = u(1.2f) })
+        heroMeta = text(1.25f, 0xE6F2F2F7.toInt(), bold = true).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
+        metaRow.addView(heroMeta, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT))
+        hero.addView(metaRow, LinearLayout.LayoutParams(u(58f), WRAP_CONTENT).apply { topMargin = u(0.9f) })
+        heroAwards = text(1.1f, 0xFFFBBF24.toInt(), bold = true).apply {
+            maxLines = 1
+            ellipsize = TextUtils.TruncateAt.END
+            compoundDrawablePadding = u(0.5f)
+            val icon = getDrawable(R.drawable.ic_award)!!.apply { setBounds(0, 0, u(1.25f), u(1.25f)) }
+            setCompoundDrawables(icon, null, null, null)
+            visibility = View.GONE
+        }
+        hero.addView(heroAwards, LinearLayout.LayoutParams(u(55f), WRAP_CONTENT).apply { topMargin = u(0.7f) })
         heroDesc = text(1.3f, 0xCCF2F2F7.toInt()).apply {
             maxLines = 3
             ellipsize = TextUtils.TruncateAt.END
             setLineSpacing(0f, 1.15f)
         }
         hero.addView(heroDesc, LinearLayout.LayoutParams(u(46f), WRAP_CONTENT).apply { topMargin = u(0.8f) })
+        heroCredits = text(1.0f, MUTED).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
+        hero.addView(heroCredits, LinearLayout.LayoutParams(u(50f), WRAP_CONTENT).apply { topMargin = u(0.7f) })
         heroHint = text(1.05f, CYAN)
         hero.addView(heroHint, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { topMargin = u(0.9f) })
-        content.addView(hero, LinearLayout.LayoutParams(MATCH_PARENT, (screenH * 0.40f).toInt()))
+        content.addView(hero, LinearLayout.LayoutParams(MATCH_PARENT, (screenH * 0.42f).toInt()))
 
         // Rows: the focused one slides up under the hero (see bringRowToTop)
         rows = LinearLayout(this).apply {
@@ -270,10 +304,10 @@ class MainActivity : Activity() {
             clipToPadding = false
             setPadding(0, 0, 0, (screenH * 0.45f).toInt())
         }
+        // Clipped to its own area so rows scrolled up don't draw over the hero
         rowsScroll = RowsScrollView(this).apply {
             isVerticalScrollBarEnabled = false
             isSmoothScrollingEnabled = true
-            clipChildren = false
             addView(rows)
         }
         content.addView(rowsScroll, LinearLayout.LayoutParams(MATCH_PARENT, 0, 1f).apply { topMargin = u(0.8f) })
@@ -352,7 +386,7 @@ class MainActivity : Activity() {
             if (heroKey != id) return@Runnable
             val merged = merge(item, metaCache[id])
             setBackdrop(merged.optString("background").ifEmpty { "https://images.metahub.space/background/medium/$id/img" })
-            if (!metaCache.containsKey(id) && (merged.optString("description").isEmpty() || merged.optString("imdbRating").isEmpty())) {
+            if (!metaCache.containsKey(id)) {
                 loader.execute {
                     val meta = runCatching { Stremio.meta(item.optString("type"), id) }.getOrNull() ?: return@execute
                     metaCache[id] = meta
@@ -369,9 +403,11 @@ class MainActivity : Activity() {
         heroLogo.visibility = View.GONE
         heroTitle.visibility = View.VISIBLE
         heroTitle.text = title
-        heroMeta.setCompoundDrawables(null, null, null, null)
+        heroImdb.visibility = View.GONE
         heroMeta.text = info
+        heroAwards.visibility = View.GONE
         heroDesc.text = ""
+        heroCredits.text = ""
         heroHint.text = hint
         setBackdrop(null)
     }
@@ -394,27 +430,55 @@ class MainActivity : Activity() {
         val runtime = item.optString("runtime").let { formatRuntime(it) }
         val genres = (item.optJSONArray("genres") ?: item.optJSONArray("genre"))?.let { g -> List(minOf(3, g.length())) { g.optString(it) } }?.joinToString(", ")
         val kind = if (item.optString("type") == "series") "Série" else "Filme"
-        heroMeta.text = listOfNotNull(rating, year, runtime, kind, genres?.ifEmpty { null }, extra).joinToString("   ·   ")
+        heroMeta.text = listOfNotNull(year, runtime, kind, genres?.ifEmpty { null }, extra).joinToString("   ·   ")
         if (rating != null) {
-            val star = getDrawable(R.drawable.ic_star)!!.mutate().apply {
-                setColorFilter(0xFFFBBF24.toInt(), PorterDuff.Mode.SRC_IN)
-                setBounds(0, 0, u(1.3f), u(1.3f))
-            }
-            heroMeta.setCompoundDrawables(star, null, null, null)
+            heroImdb.text = imdbBadge(rating)
+            heroImdb.visibility = View.VISIBLE
         } else {
-            heroMeta.setCompoundDrawables(null, null, null, null)
+            heroImdb.visibility = View.GONE
         }
+        val awards = Awards.toPortuguese(item.optString("awards"))
+        heroAwards.text = awards ?: ""
+        heroAwards.visibility = if (awards != null) View.VISIBLE else View.GONE
         heroDesc.text = item.optString("description")
-        heroHint.text = "OK abre no Stremio"
+        fun names(key: String, max: Int) = item.optJSONArray(key)?.let { a -> List(minOf(max, a.length())) { a.optString(it) } }?.filter { it.isNotBlank() }.orEmpty()
+        val cast = names("cast", 3)
+        val director = names("director", 1)
+        heroCredits.text = listOfNotNull(
+            cast.takeIf { it.isNotEmpty() }?.let { "Elenco: " + it.joinToString(", ") },
+            director.firstOrNull()?.let { "Direção: $it" },
+        ).joinToString("   ·   ")
+        heroHint.text = ""
     }
 
     private fun merge(item: JSONObject, meta: JSONObject?): JSONObject {
         if (meta == null) return item
         val out = JSONObject(item.toString())
-        for (key in listOf("description", "imdbRating", "releaseInfo", "runtime", "genres", "genre", "background", "logo")) {
+        for (key in listOf("description", "imdbRating", "releaseInfo", "runtime", "genres", "genre", "background", "logo", "awards", "cast", "director")) {
             if (out.optString(key).isEmpty() && meta.has(key)) out.put(key, meta.get(key))
         }
         return out
+    }
+
+    /** "IMDb 7.8" with the IMDb yellow tag. */
+    private fun imdbBadge(rating: String): CharSequence {
+        val tag = "IMDb"
+        return SpannableString("$tag  $rating").apply {
+            setSpan(object : android.text.style.ReplacementSpan() {
+                private val padX = u(0.45f).toFloat()
+                override fun getSize(paint: Paint, text: CharSequence?, start: Int, end: Int, fm: Paint.FontMetricsInt?) =
+                    (paint.measureText(tag) * 0.85f + padX * 2).toInt()
+                override fun draw(canvas: Canvas, text: CharSequence?, start: Int, end: Int, x: Float, top: Int, y: Int, bottom: Int, paint: Paint) {
+                    val small = Paint(paint).apply { textSize = paint.textSize * 0.85f; typeface = Typeface.DEFAULT_BOLD }
+                    val w = small.measureText(tag) + padX * 2
+                    val h = paint.textSize * 1.15f
+                    val top2 = y - paint.textSize * 0.95f
+                    canvas.drawRoundRect(x, top2, x + w, top2 + h, u(0.25f).toFloat(), u(0.25f).toFloat(), Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFF5C518.toInt() })
+                    small.color = Color.BLACK
+                    canvas.drawText(tag, x + padX, top2 + h / 2 - (small.descent() + small.ascent()) / 2, small)
+                }
+            }, 0, tag.length, 0)
+        }
     }
 
     /** "166 min" → "2h46". */
@@ -440,13 +504,6 @@ class MainActivity : Activity() {
             incoming.bringToFront()
             incoming.animate().alpha(1f).setDuration(450).start()
             backBack.animate().alpha(0f).setDuration(450).start()
-            // Keep the gradients and the content above the pictures
-            (incoming.parent as FrameLayout).let { root ->
-                for (i in 0 until root.childCount) {
-                    val child = root.getChildAt(i)
-                    if (child !== backFront && child !== backBack) child.bringToFront()
-                }
-            }
         }
     }
 
