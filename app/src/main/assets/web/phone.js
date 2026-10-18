@@ -341,12 +341,13 @@ function showTab(tab) {
   if (state.tab === 'keyboard' && tab !== 'keyboard') setKeyboard(false);
   if (tab !== 'remote') setAirMode('off');
   state.tab = tab;
-  for (const name of ['home', 'remote', 'apps', 'keyboard']) {
+  for (const name of ['home', 'remote', 'apps', 'movies', 'keyboard']) {
     $(`view-${name}`).hidden = name !== tab;
   }
   document.querySelectorAll('.tabbar button').forEach((b) => b.classList.toggle('on', b.dataset.tab === tab));
   window.scrollTo(0, 0);
   if (tab === 'apps') loadApps();
+  if (tab === 'movies') loadMovies();
   if (tab === 'keyboard') {
     setKeyboard(true);
     setTimeout(() => $('kb-input').focus(), 50);
@@ -1529,6 +1530,149 @@ function renderSongs(songs) {
 }
 $('music-search').addEventListener('submit', (e) => { e.preventDefault(); musicSearch(true); });
 $('music-results').addEventListener('click', () => musicSearch(false));
+
+// ---------- Filmes (Stremio) ----------
+// Library and "continue watching" from the user's Stremio account, plus Stremio's public
+// catalog. Titles open in the Stremio app (on the TV or on the phone).
+
+let stremio = null;
+let moviesQueryTimer = null;
+
+async function loadMovies() {
+  try { stremio = await api('/api/stremio'); } catch (e) { $('movies-body').innerHTML = ''; toast(e.message, true); return; }
+  $('stremio-dot').className = `dot ${stremio.loggedIn ? 'ok' : ''}`;
+  $('stremio-label').textContent = stremio.loggedIn ? 'Conta Stremio' : 'Entrar no Stremio';
+  const query = $('movies-search').value.trim();
+  if (query) return searchMovies(query);
+
+  const body = $('movies-body');
+  body.replaceChildren();
+  if (!stremio.loggedIn) body.append(loginCard());
+  if (stremio.loggedIn) {
+    try {
+      const { items } = await api('/api/stremio/library');
+      const watching = items.filter((i) => i.position > 0 && i.duration > 0 && i.position / i.duration < 0.95);
+      if (watching.length) body.append(shelf('Continuar assistindo', watching.map((i) => posterCard(i, { progress: i.position / i.duration }))));
+      if (items.length) body.append(shelf('Minha biblioteca', items.map((i) => posterCard(i))));
+    } catch (e) { toast(e.message, true); }
+  }
+  const [movies, series] = await Promise.all([
+    api('/api/stremio/catalog?type=movie').catch(() => ({ metas: [] })),
+    api('/api/stremio/catalog?type=series').catch(() => ({ metas: [] })),
+  ]);
+  body.append(shelf('Filmes populares', movies.metas.slice(0, 20).map((m) => posterCard(m))));
+  body.append(shelf('Séries populares', series.metas.slice(0, 20).map((m) => posterCard(m))));
+}
+
+async function searchMovies(query) {
+  const body = $('movies-body');
+  body.innerHTML = '<p class="hint">Buscando…</p>';
+  const [movies, series] = await Promise.all([
+    api(`/api/stremio/catalog?type=movie&q=${encodeURIComponent(query)}`).catch(() => ({ metas: [] })),
+    api(`/api/stremio/catalog?type=series&q=${encodeURIComponent(query)}`).catch(() => ({ metas: [] })),
+  ]);
+  if ($('movies-search').value.trim() !== query) return;
+  const all = [...movies.metas, ...series.metas];
+  if (!all.length) { body.innerHTML = '<p class="hint">Nada encontrado.</p>'; return; }
+  const grid = document.createElement('div');
+  grid.className = 'poster-grid';
+  grid.append(...all.map((m) => posterCard(m)));
+  body.replaceChildren(grid);
+}
+
+$('movies-search').addEventListener('input', () => {
+  clearTimeout(moviesQueryTimer);
+  moviesQueryTimer = setTimeout(loadMovies, 450);
+});
+
+function shelf(title, cards) {
+  const wrap = document.createElement('section');
+  wrap.className = 'shelf';
+  const h = document.createElement('h3');
+  h.textContent = title;
+  const row = document.createElement('div');
+  row.className = 'shelf-row';
+  row.append(...cards);
+  wrap.append(h, row);
+  return wrap;
+}
+
+function posterCard(item, { progress = null } = {}) {
+  const btn = document.createElement('button');
+  btn.className = 'poster';
+  btn.innerHTML = '<span class="art"><img alt="" loading="lazy"></span><strong></strong><small></small>';
+  if (item.poster) btn.querySelector('img').src = item.poster;
+  if (progress != null) btn.querySelector('.art').insertAdjacentHTML('beforeend', `<span class="bar"><span style="width:${Math.round(progress * 100)}%"></span></span>`);
+  btn.querySelector('strong').textContent = item.name;
+  btn.querySelector('small').textContent = [item.type === 'series' ? 'Série' : 'Filme', item.releaseInfo].filter(Boolean).join(' · ');
+  btn.onclick = () => titleSheet(item);
+  return btn;
+}
+
+async function titleSheet(item) {
+  const type = item.type === 'series' ? 'series' : 'movie';
+  const sheet = openSheet(`
+    <div class="meta-head"><img alt=""><div><h3></h3><p id="t-info"></p></div></div>
+    <p class="meta-desc" id="t-desc">Carregando…</p>
+    <div class="sheet-actions">
+      ${item.videoId ? `<button class="sheet-btn primary" id="t-resume">${icon('play')}Continuar (${item.videoId.split(':').slice(1).join('x') || 'de onde parou'}) na TV</button>` : ''}
+      <button class="sheet-btn${item.videoId ? '' : ' primary'}" id="t-tv">${icon('tv')}Abrir no Stremio da TV</button>
+      ${native?.openUri ? `<button class="sheet-btn" id="t-phone">${icon('phone')}Abrir no Stremio do celular</button>` : ''}
+    </div>`);
+  if (item.poster) sheet.querySelector('img').src = item.poster;
+  sheet.querySelector('h3').textContent = item.name;
+  const openTv = async (videoId) => {
+    try {
+      await api('/api/stremio/open', { type, id: item.id, videoId: videoId || '' });
+      toast(`Abrindo ${item.name} na TV`);
+      closeSheet();
+    } catch (e) { toast(e.message, true); }
+  };
+  sheetButton(sheet, 't-resume', () => openTv(item.videoId));
+  sheetButton(sheet, 't-tv', () => openTv(null));
+  sheetButton(sheet, 't-phone', () => {
+    const ok = native.openUri(`stremio:///detail/${type}/${encodeURIComponent(item.id)}`);
+    if (!ok) toast('Instale o Stremio no celular', true);
+  });
+  try {
+    const { meta } = await api(`/api/stremio/meta?type=${type}&id=${encodeURIComponent(item.id)}`);
+    sheet.querySelector('#t-info').textContent = [meta.releaseInfo || meta.year, meta.imdbRating && `IMDb ${meta.imdbRating}`, (meta.genres || meta.genre || []).slice(0, 3).join(', ')].filter(Boolean).join(' · ');
+    sheet.querySelector('#t-desc').textContent = meta.description || 'Sem sinopse.';
+  } catch { sheet.querySelector('#t-desc').textContent = ''; }
+}
+
+function loginCard() {
+  const card = document.createElement('div');
+  card.className = 'login-card';
+  card.innerHTML = `<strong>Entre com sua conta do Stremio</strong>
+    <p>Para ver a sua biblioteca e o "continuar assistindo". A senha não fica salva: só a sessão, na TV.</p>
+    <form id="stremio-login">
+      <input class="name-input" id="stremio-email" type="email" placeholder="E-mail" autocomplete="username">
+      <input class="name-input" id="stremio-pass" type="password" placeholder="Senha" autocomplete="current-password">
+      <button type="submit" class="btn-primary">Entrar</button>
+    </form>`;
+  card.querySelector('form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try {
+      await api('/api/stremio/login', { email: card.querySelector('#stremio-email').value, password: card.querySelector('#stremio-pass').value });
+      toast('Conta do Stremio conectada');
+      loadMovies();
+    } catch (err) { toast(err.message, true); }
+  });
+  return card;
+}
+
+$('stremio-account').addEventListener('click', () => {
+  if (!stremio?.loggedIn) { $('stremio-email')?.focus(); return; }
+  const sheet = openSheet(`
+    <div class="sheet-head"><div><h3>Conta do Stremio</h3><p></p></div></div>
+    <div class="sheet-actions"><button class="sheet-btn danger" id="s-out">${icon('logout')}Sair da conta</button></div>`);
+  sheet.querySelector('.sheet-head p').textContent = stremio.email || '';
+  sheetButton(sheet, 's-out', async () => {
+    try { await api('/api/stremio/logout', {}); toast('Saiu da conta do Stremio'); closeSheet(); loadMovies(); }
+    catch (e) { toast(e.message, true); }
+  });
+});
 
 // ---------- TV home layout editor (drag and drop) ----------
 // Sections: the 3 featured slots, each folder row, and the hidden apps. Drag an app by its

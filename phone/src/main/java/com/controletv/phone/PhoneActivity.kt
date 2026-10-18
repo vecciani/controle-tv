@@ -326,6 +326,15 @@ class PhoneActivity : Activity() {
         @JavascriptInterface
         fun version(): Int = BuildConfig.VERSION_CODE
 
+        /** Opens a link in whatever phone app handles it (e.g. "stremio:///detail/…"). Returns false if none. */
+        @JavascriptInterface
+        fun openUri(uri: String): Boolean {
+            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(uri)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            if (intent.resolveActivity(packageManager) == null) return false
+            main.post { runCatching { startActivity(intent) } }
+            return true
+        }
+
         /** "Atualizar a TV" button: installs the latest TV app through the phone's ADB. */
         @JavascriptInterface
         fun updateTv() {

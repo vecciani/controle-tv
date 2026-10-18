@@ -182,6 +182,19 @@
       <div class="list" id="apps-running" hidden></div>
     </section>
 
+    <!-- Filmes (Stremio) -->
+    <section class="view" id="view-movies" hidden>
+      <div class="movies-head">
+        <h2 class="kb-title">Filmes <span class="neon-text">e séries</span></h2>
+        <button class="status" id="stremio-account"><span class="dot" id="stremio-dot"></span><span id="stremio-label">Stremio</span></button>
+      </div>
+      <label class="search">
+        <i data-icon="search"></i>
+        <input id="movies-search" type="search" placeholder="Buscar filmes e séries" autocomplete="off" enterkeyhint="search">
+      </label>
+      <div id="movies-body"><p class="hint">Carregando…</p></div>
+    </section>
+
     <!-- Teclado -->
     <section class="view" id="view-keyboard" hidden>
       <h2 class="kb-title">Digite <span class="neon-text">direto na TV</span></h2>
@@ -200,6 +213,7 @@
     <button data-tab="home" class="on"><i data-icon="house"></i><span>Início</span></button>
     <button data-tab="remote"><i data-icon="gamepad"></i><span>Controle</span></button>
     <button data-tab="apps"><i data-icon="grid"></i><span>Apps</span></button>
+    <button data-tab="movies"><i data-icon="film"></i><span>Filmes</span></button>
     <button data-tab="keyboard"><i data-icon="keyboard"></i><span>Teclado</span></button>
   </nav>
 </div>

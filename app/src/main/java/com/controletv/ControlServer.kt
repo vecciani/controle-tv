@@ -236,6 +236,37 @@ class ControlServer(
                 ok()
             }
 
+            path == "/api/stremio" -> ok(Stremio.status(context))
+
+            path == "/api/stremio/login" && post -> {
+                val body = body(session)
+                Stremio.login(context, body.getString("email").trim(), body.getString("password"))
+                ok(Stremio.status(context))
+            }
+
+            path == "/api/stremio/logout" && post -> {
+                Stremio.logout(context)
+                ok()
+            }
+
+            path == "/api/stremio/library" -> ok(JSONObject().put("items", Stremio.library(context)))
+
+            path == "/api/stremio/catalog" -> {
+                val type = session.parameters["type"]?.firstOrNull() ?: "movie"
+                ok(JSONObject().put("metas", Stremio.catalog(type, session.parameters["q"]?.firstOrNull())))
+            }
+
+            path == "/api/stremio/meta" -> {
+                val type = session.parameters["type"]?.firstOrNull() ?: "movie"
+                ok(JSONObject().put("meta", Stremio.meta(type, session.parameters["id"]?.firstOrNull().orEmpty())))
+            }
+
+            path == "/api/stremio/open" && post -> {
+                val body = body(session)
+                Stremio.openOnTv(context, body.optString("type"), body.getString("id"), body.optString("videoId").ifEmpty { null })
+                ok()
+            }
+
             path == "/api/media" -> ok(MusicBridge.state(context))
 
             path == "/api/media/art" -> {
