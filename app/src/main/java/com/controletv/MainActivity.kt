@@ -1,7 +1,10 @@
 package com.controletv
 
+import android.animation.Animator
+import android.animation.AnimatorListenerAdapter
 import android.animation.AnimatorSet
 import android.animation.ObjectAnimator
+import android.animation.ValueAnimator
 import android.app.Activity
 import android.app.Dialog
 import android.content.BroadcastReceiver
@@ -78,8 +81,12 @@ class MainActivity : Activity() {
     private val pairing by lazy { Pairing(this) }
 
     private lateinit var clock: TextView
-    private var greetingText = ""
-    private var dateText = ""
+    private lateinit var greeting: TextView
+    private lateinit var date: TextView
+    // Search, status, greeting and music: shown on the menu, hidden while browsing the rows
+    private lateinit var header: LinearLayout
+    private var headerShown = true
+    private var headerAnim: ValueAnimator? = null
     private lateinit var phoneChip: ImageView
     private lateinit var adbChip: ImageView
     private lateinit var wifiButton: ImageView
@@ -218,36 +225,45 @@ class MainActivity : Activity() {
     private fun buildScreen(): View {
         val root = FrameLayout(this).apply { background = NeonBackground() }
 
-        // Three fixed bands that never overlap, like the Fire TV and Netflix homes:
-        // menu bar on top, the focused title's hero in the middle, the rows at the bottom
-        val navTop = (screenH * 0.022f).toInt()
-        val navH = (screenH * 0.085f).toInt()
-        val heroTop = (screenH * 0.125f).toInt()
-        val heroH = (screenH * 0.475f).toInt()
-        val rowsTop = heroTop + heroH + (screenH * 0.01f).toInt()
+        // A column of bands that never overlap: the top (search, status, greeting, music), which
+        // folds away while browsing the rows; the tabs; the focused title's hero; the rows
+        val column = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
 
-        // ---- Menu bar: search and tabs on the left; music, status and clock on the right
-        val nav = LinearLayout(this).apply {
+        // ---- Top: search bar, then status and clock; below, greeting and date, and the music player
+        header = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(u(3.5f), (screenH * 0.022f).toInt(), u(3.5f), 0)
+        }
+        val topRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(u(3f), 0, u(3.5f), 0)
-            clipChildren = false
-            clipToPadding = false
         }
-        nav.addView(navButton("Pesquisar no Stremio, SmartTube e AuraMusic", R.drawable.ic_m_search, null) { SearchDialog().show() },
-            LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { rightMargin = u(0.6f) })
-        TABS.forEach { (id, label, icon) ->
-            val view = tabView(id, label, icon)
-            tabViews[id] = view
-            nav.addView(view, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { rightMargin = u(0.6f) })
+        val searchBar = Button(this).apply {
+            text = "Pesquisar no Stremio, SmartTube e AuraMusic…"
+            isAllCaps = false
+            textSize = px(1.2f)
+            setTextColor(MUTED)
+            isSingleLine = true
+            ellipsize = TextUtils.TruncateAt.END
+            gravity = Gravity.START or Gravity.CENTER_VERTICAL
+            minHeight = 0
+            minimumHeight = 0
+            setPadding(u(1.5f), u(0.75f), u(1.5f), u(0.75f))
+            val icon = getDrawable(R.drawable.ic_m_search)!!.apply { setBounds(0, 0, u(1.5f), u(1.5f)) }
+            setCompoundDrawables(icon, null, null, null)
+            compoundDrawablePadding = u(1f)
+            background = StateListDrawable().apply {
+                addState(intArrayOf(android.R.attr.state_focused), rounded(0x3322D3EE, u(3f).toFloat(), CYAN))
+                addState(intArrayOf(), rounded(0xCC12121D.toInt(), u(3f).toFloat(), LINE))
+            }
+            setOnClickListener { SearchDialog().show() }
         }
-        styleTabs()
-        nav.addView(View(this), LinearLayout.LayoutParams(0, 0, 1f))
-        nav.addView(buildMusicWidget(), LinearLayout.LayoutParams(u(21f), WRAP_CONTENT).apply { rightMargin = u(1.2f) })
+        topRow.addView(searchBar, LinearLayout.LayoutParams(u(36f), WRAP_CONTENT))
+        topRow.addView(View(this), LinearLayout.LayoutParams(0, 0, 1f))
         phoneChip = statusIcon(R.drawable.ic_s_phone)
         adbChip = statusIcon(R.drawable.ic_s_plug)
-        nav.addView(phoneChip, LinearLayout.LayoutParams(u(1.6f), u(1.6f)).apply { rightMargin = u(0.9f) })
-        nav.addView(adbChip, LinearLayout.LayoutParams(u(1.6f), u(1.6f)).apply { rightMargin = u(0.5f) })
+        topRow.addView(phoneChip, LinearLayout.LayoutParams(u(1.7f), u(1.7f)).apply { rightMargin = u(1f) })
+        topRow.addView(adbChip, LinearLayout.LayoutParams(u(1.7f), u(1.7f)).apply { rightMargin = u(0.6f) })
         wifiButton = statusIcon(R.drawable.ic_s_wifi).apply {
             isFocusable = true
             setPadding(u(0.4f), u(0.4f), u(0.4f), u(0.4f))
@@ -259,15 +275,48 @@ class MainActivity : Activity() {
                 if (!SystemShortcuts.open(this@MainActivity, SystemShortcuts.SETTINGS.first { it.key == "set:net" })) toast("Esta TV não abriu a tela de rede")
             }
         }
-        nav.addView(wifiButton, LinearLayout.LayoutParams(u(2.4f), u(2.4f)).apply { rightMargin = u(1.2f) })
-        clock = text(1.8f, TEXT, bold = true)
-        nav.addView(clock)
-        root.addView(nav, FrameLayout.LayoutParams(MATCH_PARENT, navH, Gravity.TOP).apply { topMargin = navTop })
+        topRow.addView(wifiButton, LinearLayout.LayoutParams(u(2.5f), u(2.5f)).apply { rightMargin = u(1.4f) })
+        clock = text(2.2f, TEXT, bold = true)
+        topRow.addView(clock)
+        header.addView(topRow)
 
-        // ---- Hero: the focused title's picture on the right (only inside this band), faded into
-        // the background on its left and bottom, and its details on the left
+        val helloRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        val hello = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        greeting = text(2.7f, TEXT, bold = true).apply {
+            letterSpacing = -0.02f
+            maxLines = 1
+            ellipsize = TextUtils.TruncateAt.END
+            setShadowLayer(u(1f).toFloat(), 0f, 0f, 0x5522D3EE)
+        }
+        date = text(1.35f, MUTED)
+        hello.addView(greeting)
+        hello.addView(date, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { topMargin = u(0.5f) })
+        helloRow.addView(hello, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+        helloRow.addView(buildMusicWidget(), LinearLayout.LayoutParams(u(30f), WRAP_CONTENT))
+        header.addView(helloRow, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = u(1f) })
+        column.addView(header, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+
+        // ---- Tabs: always visible; moving onto one swaps the rows
+        val tabRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(u(2.3f), u(1.2f), u(3.5f), u(0.6f))
+        }
+        TABS.forEach { (id, label, icon) ->
+            val view = tabView(id, label, icon)
+            tabViews[id] = view
+            tabRow.addView(view, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { rightMargin = u(0.8f) })
+        }
+        styleTabs()
+        column.addView(tabRow, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+
+        // ---- Hero: the focused title's picture across the whole band (never under the rows),
+        // darkened on the left for the details and faded at the bottom; it grows when the top folds away
         val heroBox = FrameLayout(this)
-        val backW = (screenW * 0.66f).toInt()
+        val backW = screenW
         val backdrop = FrameLayout(this)
         backBack = backdropView()
         backFront = backdropView()
@@ -277,13 +326,13 @@ class MainActivity : Activity() {
         heroBox.addView(View(this).apply { setBackgroundColor(0x3307070C) }, FrameLayout.LayoutParams(backW, MATCH_PARENT, Gravity.END))
         heroBox.addView(View(this).apply {
             background = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT, intArrayOf(0xFF07070C.toInt(), 0xD907070C.toInt(), 0x5907070C, 0x0007070C))
-        }, FrameLayout.LayoutParams((backW * 0.55f).toInt(), MATCH_PARENT, Gravity.START).apply { leftMargin = screenW - backW })
+        }, FrameLayout.LayoutParams((screenW * 0.62f).toInt(), MATCH_PARENT, Gravity.START))
         heroBox.addView(View(this).apply {
             background = GradientDrawable(GradientDrawable.Orientation.BOTTOM_TOP, intArrayOf(0xFF07070C.toInt(), 0x8007070C.toInt(), 0x0007070C))
-        }, FrameLayout.LayoutParams(backW, (heroH * 0.35f).toInt(), Gravity.BOTTOM or Gravity.END))
+        }, FrameLayout.LayoutParams(MATCH_PARENT, (screenH * 0.2f).toInt(), Gravity.BOTTOM))
         heroBox.addView(View(this).apply {
             background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(0xB307070C.toInt(), 0x0007070C))
-        }, FrameLayout.LayoutParams(backW, (heroH * 0.18f).toInt(), Gravity.TOP or Gravity.END))
+        }, FrameLayout.LayoutParams(MATCH_PARENT, (screenH * 0.08f).toInt(), Gravity.TOP))
 
         // Details: logo (or title), IMDb · year · length · genres, awards, synopsis, cast, hint
         val hero = LinearLayout(this).apply {
@@ -333,7 +382,7 @@ class MainActivity : Activity() {
         heroHint = text(1.05f, CYAN).apply { visibility = View.GONE }
         hero.addView(heroHint, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { topMargin = u(0.9f) })
         heroBox.addView(hero, FrameLayout.LayoutParams(u(56f), MATCH_PARENT, Gravity.START))
-        root.addView(heroBox, FrameLayout.LayoutParams(MATCH_PARENT, heroH, Gravity.TOP).apply { topMargin = heroTop })
+        column.addView(heroBox, LinearLayout.LayoutParams(MATCH_PARENT, 0, 1f))
 
         // ---- Rows: the focused one slides up to the top of its band (see bringRowToTop)
         rows = LinearLayout(this).apply {
@@ -350,7 +399,13 @@ class MainActivity : Activity() {
             isSmoothScrollingEnabled = true
             addView(rows)
         }
-        root.addView(rowsScroll, FrameLayout.LayoutParams(MATCH_PARENT, screenH - rowsTop, Gravity.TOP).apply { topMargin = rowsTop })
+        column.addView(rowsScroll, LinearLayout.LayoutParams(MATCH_PARENT, (screenH * 0.39f).toInt()).apply { topMargin = u(0.4f) })
+        root.addView(column, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+
+        // The top folds away while browsing the rows and comes back on the menu
+        root.viewTreeObserver.addOnGlobalFocusChangeListener { _, now ->
+            if (now != null && !rebuilding) showHeader(!inRows(now))
+        }
 
         updateButton = Button(this).apply {
             text = "Nova versão do Controle TV pronta: aperte OK para instalar"
@@ -461,6 +516,39 @@ class MainActivity : Activity() {
         tabViews.forEach { (id, view) -> stylePill(view, open = id == tab) }
     }
 
+    /** Folds the top (search, status, greeting, music) away or brings it back, smoothly. */
+    private fun showHeader(show: Boolean) {
+        if (show == headerShown) return
+        headerShown = show
+        val from = header.height
+        val to = if (show) {
+            header.measure(
+                View.MeasureSpec.makeMeasureSpec(header.width.takeIf { it > 0 } ?: screenW, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
+            )
+            header.measuredHeight
+        } else 0
+        headerAnim?.cancel()
+        headerAnim = ValueAnimator.ofInt(from, to).apply {
+            duration = 320
+            interpolator = DecelerateInterpolator()
+            addUpdateListener {
+                header.layoutParams.height = it.animatedValue as Int
+                header.requestLayout()
+            }
+            addListener(object : AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: Animator) {
+                    if (headerShown) {
+                        header.layoutParams.height = WRAP_CONTENT
+                        header.requestLayout()
+                    }
+                }
+            })
+            start()
+        }
+        header.animate().alpha(if (show) 1f else 0f).setDuration(260).start()
+    }
+
     private fun statusIcon(icon: Int) = ImageView(this).apply {
         setImageResource(icon)
         scaleType = ImageView.ScaleType.FIT_CENTER
@@ -491,7 +579,7 @@ class MainActivity : Activity() {
             "settings" -> "Telas da Fire TV, entradas e tela inicial"
             else -> restSummary()
         }
-        heroText(greetingText, "$dateText   ·   $about", "Desça para escolher")
+        heroText(TABS.first { it.first == tab }.second, about, "Desça para escolher")
         heroKey = "tab"
     }
 
@@ -683,9 +771,12 @@ class MainActivity : Activity() {
             else -> restRows(d)
         }
         rebuilding = false
-        // Take the focus back only when it was in the rows (or on first show), never from the tabs or the top
-        if (focusInRows || !focusedOnce || currentFocus == null) {
+        // First show starts on the tabs (top showing); later, take the focus back only when it was
+        // in the rows, never from the tabs or the top
+        if (!focusedOnce) {
             focusedOnce = true
+            tabViews[tab]?.requestFocus()
+        } else if (focusInRows || currentFocus == null) {
             (focusedTag?.let { rows.findViewWithTag<View>(it) } ?: firstCard())?.requestFocus()
         }
     }
@@ -1310,12 +1401,12 @@ class MainActivity : Activity() {
     // ---------- Music chip (top bar) ----------
 
     /** OK on the chip: play/pause what's playing, or open the music app when nothing is. */
-    /** Compact player for the menu bar: cover, title and artist, previous / play / next. */
+    /** Music player next to the greeting: cover, title and artist, previous / play / next. */
     private fun buildMusicWidget(): View {
         musicBox = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(u(0.5f), u(0.5f), u(0.6f), u(0.5f))
+            setPadding(u(0.8f), u(0.8f), u(0.9f), u(0.8f))
             background = StateListDrawable().apply {
                 addState(intArrayOf(android.R.attr.state_focused), rounded(0x3322D3EE, u(1.2f).toFloat(), CYAN))
                 addState(intArrayOf(), rounded(0xCC12121D.toInt(), u(1.2f).toFloat(), VIOLET_DIM))
@@ -1331,13 +1422,13 @@ class MainActivity : Activity() {
             clipToOutline = true
             setImageResource(R.drawable.ic_m_music)
         }
-        musicBox.addView(musicArt, LinearLayout.LayoutParams(u(3.4f), u(3.4f)))
+        musicBox.addView(musicArt, LinearLayout.LayoutParams(u(4.6f), u(4.6f)))
         val info = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(u(0.8f), 0, u(0.4f), 0)
         }
-        musicTitle = text(1.05f, TEXT, bold = true).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
-        musicArtist = text(0.9f, MUTED).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
+        musicTitle = text(1.25f, TEXT, bold = true).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
+        musicArtist = text(1.0f, MUTED).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
         info.addView(musicTitle)
         info.addView(musicArtist, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { topMargin = u(0.25f) })
         musicBox.addView(info, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
@@ -1359,7 +1450,7 @@ class MainActivity : Activity() {
 
     private fun mediaButton(icon: Int, primary: Boolean, onClick: () -> Unit) = ImageView(this).apply {
         setImageResource(icon)
-        val size = u(if (primary) 2.6f else 2.2f)
+        val size = u(if (primary) 2.9f else 2.4f)
         layoutParams = LinearLayout.LayoutParams(size, size).apply { leftMargin = u(0.3f) }
         setPadding(u(0.5f), u(0.5f), u(0.5f), u(0.5f))
         isFocusable = true
@@ -1466,9 +1557,8 @@ class MainActivity : Activity() {
         clock.text = SimpleDateFormat("HH:mm", Locale.getDefault()).format(now)
         val hour = SimpleDateFormat("H", Locale.getDefault()).format(now).toInt()
         val hello = when { hour < 5 -> "Boa noite"; hour < 12 -> "Bom dia"; hour < 18 -> "Boa tarde"; else -> "Boa noite" }
-        greetingText = "$hello, ${HomePrefs.name(this)}"
-        dateText = SimpleDateFormat("EEEE, d 'de' MMMM", Locale("pt", "BR")).format(now).replaceFirstChar { it.uppercase() }
-        if (heroKey == "tab") heroForTab()
+        greeting.text = "$hello, ${HomePrefs.name(this)}"
+        date.text = SimpleDateFormat("EEEE, d 'de' MMMM", Locale("pt", "BR")).format(now).replaceFirstChar { it.uppercase() }
     }
 
     private fun updateStatus() {
