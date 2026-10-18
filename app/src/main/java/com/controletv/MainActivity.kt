@@ -15,7 +15,9 @@ import android.graphics.ColorFilter
 import android.graphics.Outline
 import android.graphics.Paint
 import android.graphics.PixelFormat
+import android.graphics.PorterDuff
 import android.graphics.RadialGradient
+import android.graphics.Rect
 import android.graphics.Shader
 import android.graphics.Typeface
 import android.graphics.drawable.ColorDrawable
@@ -33,8 +35,8 @@ import android.os.Looper
 import android.provider.Settings
 import android.text.Editable
 import android.text.SpannableString
-import android.text.TextWatcher
 import android.text.TextUtils
+import android.text.TextWatcher
 import android.text.style.ForegroundColorSpan
 import android.view.Gravity
 import android.view.KeyEvent
@@ -53,6 +55,7 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
+import org.json.JSONObject
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -60,13 +63,13 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 
 /**
- * The TV home screen, drawn with plain Android views so remote-control navigation is
- * handled by the system itself: instant and smooth even on modest Fire TV hardware.
+ * The TV home screen, Netflix style, drawn with plain Android views so remote-control
+ * navigation is handled by the system itself (instant and smooth on Fire TV hardware).
  *
- * Layout: a greeting and a music widget (controls whatever is playing), three big featured apps
- * the user picks, then folder rows (films, live channels, music…) and a settings row with the
- * same shortcuts as the Fire TV home. Everything scrolls with the remote.
- * OK opens; holding OK (or the menu button) opens the app's options.
+ * The focused film or series fills the background, with its logo, rating, year, genres and
+ * synopsis on top. Below: Stremio's "continue watching", new releases, genres and the user's
+ * library as rows of big posters (the focused row slides up under the details), then the apps,
+ * folders, inputs and settings. OK opens; holding OK (or the menu button) opens app options.
  */
 class MainActivity : Activity() {
     private val handler = Handler(Looper.getMainLooper())
@@ -74,21 +77,27 @@ class MainActivity : Activity() {
     private val pairing by lazy { Pairing(this) }
 
     private lateinit var clock: TextView
+    private lateinit var greeting: TextView
     private lateinit var phoneChip: TextView
     private lateinit var adbChip: TextView
     private lateinit var wifiButton: Button
-    private lateinit var greeting: TextView
-    private lateinit var date: TextView
-    private lateinit var heroSub: TextView
-    private lateinit var featuredRow: LinearLayout
-    private lateinit var musicArt: ImageView
-    private lateinit var musicTitle: TextView
-    private lateinit var musicArtist: TextView
-    private lateinit var musicControls: LinearLayout
-    private lateinit var musicPlay: ImageView
-    private lateinit var musicAction: Button
+    private lateinit var musicChip: Button
     private var musicKey = ""
     private var askedMusicPermission = false
+
+    // Hero: the focused title's details over its backdrop
+    private lateinit var backFront: ImageView
+    private lateinit var backBack: ImageView
+    private lateinit var heroLogo: ImageView
+    private lateinit var heroTitle: TextView
+    private lateinit var heroMeta: TextView
+    private lateinit var heroDesc: TextView
+    private lateinit var heroHint: TextView
+    private var heroKey = ""
+    private var heroPending: Runnable? = null
+    private var backdropUrl: String? = null
+    private val metaCache = ConcurrentHashMap<String, JSONObject>()
+
     private lateinit var rowsScroll: ScrollView
     private lateinit var rows: LinearLayout
     private lateinit var firstRun: FrameLayout
@@ -98,13 +107,13 @@ class MainActivity : Activity() {
 
     private var shownSignature = ""
 
-    // Stremio content for the top of the home, refreshed in the background every few minutes
+    // Stremio content, refreshed in the background every few minutes
     private var stremioLoggedIn = false
-    private var stremioWatching: List<org.json.JSONObject> = emptyList()
-    private var stremioLibrary: List<org.json.JSONObject> = emptyList()
-    private var newMovies: List<org.json.JSONObject> = emptyList()
-    private var newSeries: List<org.json.JSONObject> = emptyList()
-    private var genreRows: List<Pair<String, List<org.json.JSONObject>>> = emptyList()
+    private var stremioWatching: List<JSONObject> = emptyList()
+    private var stremioLibrary: List<JSONObject> = emptyList()
+    private var newMovies: List<JSONObject> = emptyList()
+    private var newSeries: List<JSONObject> = emptyList()
+    private var genreRows: List<Pair<String, List<JSONObject>>> = emptyList()
     private var stremioFetchedAt = 0L
     private var stremioVersion = 0
     private var shownUrl: String? = null
@@ -112,6 +121,7 @@ class MainActivity : Activity() {
     private var shownChanges = -1
 
     private val unit by lazy { resources.displayMetrics.widthPixels / 100f } // 1% of screen width
+    private val screenH by lazy { resources.displayMetrics.heightPixels }
 
     private val packages = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) = loadApps(force = true)
@@ -168,103 +178,105 @@ class MainActivity : Activity() {
 
     private fun buildScreen(): View {
         val root = FrameLayout(this).apply { background = NeonBackground() }
+
+        // Backdrop of the focused title (two layers for a crossfade), darkened towards the
+        // left and the bottom so the text and the rows stay readable
+        backBack = backdropView()
+        backFront = backdropView()
+        root.addView(backBack, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+        root.addView(backFront, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+        root.addView(View(this).apply {
+            background = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT, intArrayOf(0xF207070C.toInt(), 0xB307070C.toInt(), 0x0007070C))
+        }, FrameLayout.LayoutParams((resources.displayMetrics.widthPixels * 0.75f).toInt(), MATCH_PARENT))
+        root.addView(View(this).apply {
+            background = GradientDrawable(GradientDrawable.Orientation.BOTTOM_TOP, intArrayOf(0xFF07070C.toInt(), 0xF207070C.toInt(), 0x0007070C))
+        }, FrameLayout.LayoutParams(MATCH_PARENT, (screenH * 0.62f).toInt(), Gravity.BOTTOM))
+        root.addView(View(this).apply {
+            background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(0xB307070C.toInt(), 0x0007070C))
+        }, FrameLayout.LayoutParams(MATCH_PARENT, (screenH * 0.18f).toInt(), Gravity.TOP))
+
         val content = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(u(3.5f), u(2f), u(3.5f), 0)
-            // Let the focused card's ring and zoom spill into the margins instead of being cut
+            setPadding(u(3.5f), u(1.8f), u(3.5f), 0)
             clipChildren = false
             clipToPadding = false
         }
 
-        // Top bar: status, clock and the Wi-Fi button on the right
+        // Top bar: greeting on the left; search, music, status, clock and Wi-Fi on the right
         val top = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL or Gravity.END
+            gravity = Gravity.CENTER_VERTICAL
         }
+        greeting = text(1.35f, 0xDDF2F2F7.toInt(), bold = true).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
+        top.addView(greeting, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+        top.addView(pillButton("Pesquisar", R.drawable.ic_m_search) { SearchDialog().show() },
+            LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { rightMargin = u(0.8f) })
+        musicChip = pillButton("Música", R.drawable.ic_m_music) { musicChipClick() }.apply {
+            maxWidth = u(22f)
+            isSingleLine = true
+            ellipsize = TextUtils.TruncateAt.END
+            setOnLongClickListener {
+                runCatching { MusicBridge.openSearch(this@MainActivity) }.onFailure { toast(it.message ?: "Sem app de música") }
+                true
+            }
+        }
+        top.addView(musicChip, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { rightMargin = u(1.2f) })
         phoneChip = chip()
         adbChip = chip()
-        top.addView(phoneChip, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { rightMargin = u(0.8f) })
-        top.addView(adbChip, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { rightMargin = u(1.6f) })
-        clock = text(2.2f, TEXT, bold = true)
-        top.addView(clock, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { rightMargin = u(1.6f) })
-        wifiButton = pillButton("Wi-Fi") {
-            runCatching { startActivity(Intent(Settings.ACTION_WIFI_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
-                .onFailure { startActivity(Intent(Settings.ACTION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+        top.addView(phoneChip, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { rightMargin = u(0.6f) })
+        top.addView(adbChip, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { rightMargin = u(1.2f) })
+        clock = text(1.9f, TEXT, bold = true)
+        top.addView(clock, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { rightMargin = u(1.2f) })
+        wifiButton = pillButton("Wi-Fi", null) {
+            if (!SystemShortcuts.open(this, SystemShortcuts.SETTINGS.first { it.key == "set:net" })) toast("Esta TV não abriu a tela de rede")
         }
         top.addView(wifiButton)
         content.addView(top)
 
-        // Everything below scrolls with the remote
-        val page = LinearLayout(this).apply {
+        // Hero: logo (or title), rating · year · length · genres, synopsis, hint
+        val hero = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            clipChildren = false
-            clipToPadding = false
-            setPadding(0, 0, 0, u(8f))
+            gravity = Gravity.BOTTOM
         }
-
-        // Search bar: apps, music in AuraMusic, videos on YouTube
-        val searchBar = Button(this).apply {
-            text = "Pesquisar no Stremio, SmartTube e AuraMusic…"
-            isAllCaps = false
-            textSize = px(1.3f)
-            setTextColor(MUTED)
-            gravity = Gravity.START or Gravity.CENTER_VERTICAL
-            setPadding(u(1.6f), u(0.9f), u(1.6f), u(0.9f))
-            val icon = getDrawable(R.drawable.ic_m_search)!!.apply { setBounds(0, 0, u(1.6f), u(1.6f)) }
-            setCompoundDrawables(icon, null, null, null)
-            compoundDrawablePadding = u(1f)
-            background = StateListDrawable().apply {
-                addState(intArrayOf(android.R.attr.state_focused), rounded(0x3322D3EE, u(3f).toFloat(), CYAN))
-                addState(intArrayOf(), rounded(0xCC12121D.toInt(), u(3f).toFloat(), LINE))
-            }
-            setOnClickListener { SearchDialog().show() }
+        heroLogo = ImageView(this).apply {
+            scaleType = ImageView.ScaleType.FIT_START
+            adjustViewBounds = true
+            visibility = View.GONE
         }
-        page.addView(searchBar, LinearLayout.LayoutParams(u(40f), WRAP_CONTENT).apply { topMargin = u(1.2f) })
-
-        // Greeting on the left, music widget on the right
-        val header = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
-        val hello = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        greeting = text(3.4f, TEXT, bold = true).apply {
+        hero.addView(heroLogo, LinearLayout.LayoutParams(u(30f), (screenH * 0.13f).toInt()))
+        heroTitle = text(3.6f, TEXT, bold = true).apply {
+            maxLines = 2
+            ellipsize = TextUtils.TruncateAt.END
             letterSpacing = -0.02f
-            setShadowLayer(u(1f).toFloat(), 0f, 0f, 0x5522D3EE)
+            setShadowLayer(u(0.8f).toFloat(), 0f, 0f, 0xAA000000.toInt())
         }
-        date = text(1.4f, MUTED)
-        hello.addView(greeting)
-        hello.addView(date, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { topMargin = u(0.5f) })
-        header.addView(hello, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
-        header.addView(buildMusicWidget(), LinearLayout.LayoutParams(u(34f), WRAP_CONTENT))
-        page.addView(header, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = u(1.6f) })
-
-        // Three big featured apps
-        featuredRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            clipChildren = false
-            clipToPadding = false
-            setPadding(u(1.5f), u(1.6f), u(1.5f), u(1.2f))
+        hero.addView(heroTitle, LinearLayout.LayoutParams(u(48f), WRAP_CONTENT))
+        heroMeta = text(1.3f, 0xE6F2F2F7.toInt(), bold = true).apply { compoundDrawablePadding = u(0.5f) }
+        hero.addView(heroMeta, LinearLayout.LayoutParams(u(55f), WRAP_CONTENT).apply { topMargin = u(0.9f) })
+        heroDesc = text(1.3f, 0xCCF2F2F7.toInt()).apply {
+            maxLines = 3
+            ellipsize = TextUtils.TruncateAt.END
+            setLineSpacing(0f, 1.15f)
         }
-        page.addView(featuredRow, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply {
-            topMargin = u(1.2f)
-            leftMargin = -u(1.5f)
-        })
-        heroSub = text(1.3f, MUTED)
-        page.addView(heroSub, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { bottomMargin = u(1.6f) })
+        hero.addView(heroDesc, LinearLayout.LayoutParams(u(46f), WRAP_CONTENT).apply { topMargin = u(0.8f) })
+        heroHint = text(1.05f, CYAN)
+        hero.addView(heroHint, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { topMargin = u(0.9f) })
+        content.addView(hero, LinearLayout.LayoutParams(MATCH_PARENT, (screenH * 0.40f).toInt()))
 
+        // Rows: the focused one slides up under the hero (see bringRowToTop)
         rows = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             clipChildren = false
             clipToPadding = false
+            setPadding(0, 0, 0, (screenH * 0.45f).toInt())
         }
-        page.addView(rows)
-        rowsScroll = ScrollView(this).apply {
+        rowsScroll = RowsScrollView(this).apply {
             isVerticalScrollBarEnabled = false
             isSmoothScrollingEnabled = true
             clipChildren = false
-            addView(page)
+            addView(rows)
         }
-        content.addView(rowsScroll, LinearLayout.LayoutParams(MATCH_PARENT, 0, 1f).apply { topMargin = u(0.6f) })
+        content.addView(rowsScroll, LinearLayout.LayoutParams(MATCH_PARENT, 0, 1f).apply { topMargin = u(0.8f) })
         root.addView(content, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
 
         updateButton = Button(this).apply {
@@ -307,6 +319,137 @@ class MainActivity : Activity() {
         return root
     }
 
+    private fun backdropView() = ImageView(this).apply {
+        scaleType = ImageView.ScaleType.CENTER_CROP
+        alpha = 0f
+    }
+
+    /** Vertical scroll that only moves when we say (bringRowToTop), not on every focus change. */
+    private class RowsScrollView(context: Context) : ScrollView(context) {
+        override fun computeScrollDeltaToGetChildRectOnScreen(rect: Rect?) = 0
+    }
+
+    /** Slides the row holding [view] up to the top of the rows area, Netflix style. */
+    private fun bringRowToTop(view: View) {
+        var child: View = view
+        var parent = child.parent
+        while (parent is View && parent !== rows) {
+            child = parent
+            parent = child.parent
+        }
+        if (parent === rows) rowsScroll.smoothScrollTo(0, child.top)
+    }
+
+    // ---------- Hero ----------
+
+    /** Shows a film or series: details at once, missing ones (synopsis, rating) fetched, backdrop after a short pause. */
+    private fun heroFor(item: JSONObject, extra: String?) {
+        val id = item.optString("id")
+        heroKey = id
+        applyHero(merge(item, metaCache[id]), extra)
+        heroPending?.let { handler.removeCallbacks(it) }
+        heroPending = Runnable {
+            if (heroKey != id) return@Runnable
+            val merged = merge(item, metaCache[id])
+            setBackdrop(merged.optString("background").ifEmpty { "https://images.metahub.space/background/medium/$id/img" })
+            if (!metaCache.containsKey(id) && (merged.optString("description").isEmpty() || merged.optString("imdbRating").isEmpty())) {
+                loader.execute {
+                    val meta = runCatching { Stremio.meta(item.optString("type"), id) }.getOrNull() ?: return@execute
+                    metaCache[id] = meta
+                    runOnUiThread { if (heroKey == id) applyHero(merge(item, meta), extra) }
+                }
+            }
+        }.also { handler.postDelayed(it, 260) }
+    }
+
+    /** Shows an app, a shortcut or anything without a backdrop. */
+    private fun heroText(title: String, info: String, hint: String) {
+        heroKey = "text:$title"
+        heroPending?.let { handler.removeCallbacks(it) }
+        heroLogo.visibility = View.GONE
+        heroTitle.visibility = View.VISIBLE
+        heroTitle.text = title
+        heroMeta.setCompoundDrawables(null, null, null, null)
+        heroMeta.text = info
+        heroDesc.text = ""
+        heroHint.text = hint
+        setBackdrop(null)
+    }
+
+    private fun applyHero(item: JSONObject, extra: String?) {
+        val id = item.optString("id")
+        val name = item.optString("name")
+        heroTitle.text = name
+        heroTitle.visibility = View.VISIBLE
+        heroLogo.visibility = View.GONE
+        // Show the title's logo instead of plain text when there is one
+        RemoteImages.load(item.optString("logo").ifEmpty { "https://images.metahub.space/logo/medium/$id/img" }, heroLogo, u(30f)) { ok ->
+            if (ok && heroKey == id) {
+                heroLogo.visibility = View.VISIBLE
+                heroTitle.visibility = View.GONE
+            }
+        }
+        val rating = item.optString("imdbRating").ifEmpty { null }
+        val year = item.optString("releaseInfo").ifEmpty { item.optString("year") }.ifEmpty { null }
+        val runtime = item.optString("runtime").let { formatRuntime(it) }
+        val genres = (item.optJSONArray("genres") ?: item.optJSONArray("genre"))?.let { g -> List(minOf(3, g.length())) { g.optString(it) } }?.joinToString(", ")
+        val kind = if (item.optString("type") == "series") "Série" else "Filme"
+        heroMeta.text = listOfNotNull(rating, year, runtime, kind, genres?.ifEmpty { null }, extra).joinToString("   ·   ")
+        if (rating != null) {
+            val star = getDrawable(R.drawable.ic_star)!!.mutate().apply {
+                setColorFilter(0xFFFBBF24.toInt(), PorterDuff.Mode.SRC_IN)
+                setBounds(0, 0, u(1.3f), u(1.3f))
+            }
+            heroMeta.setCompoundDrawables(star, null, null, null)
+        } else {
+            heroMeta.setCompoundDrawables(null, null, null, null)
+        }
+        heroDesc.text = item.optString("description")
+        heroHint.text = "OK abre no Stremio"
+    }
+
+    private fun merge(item: JSONObject, meta: JSONObject?): JSONObject {
+        if (meta == null) return item
+        val out = JSONObject(item.toString())
+        for (key in listOf("description", "imdbRating", "releaseInfo", "runtime", "genres", "genre", "background", "logo")) {
+            if (out.optString(key).isEmpty() && meta.has(key)) out.put(key, meta.get(key))
+        }
+        return out
+    }
+
+    /** "166 min" → "2h46". */
+    private fun formatRuntime(raw: String): String? {
+        val minutes = Regex("(\\d+)").find(raw)?.value?.toIntOrNull() ?: return null
+        return if (minutes >= 60) "${minutes / 60}h${(minutes % 60).toString().padStart(2, '0')}" else "$minutes min"
+    }
+
+    /** Crossfades the backdrop to a new picture (null = back to the plain neon background). */
+    private fun setBackdrop(url: String?) {
+        if (url == backdropUrl) return
+        backdropUrl = url
+        if (url == null) {
+            backFront.animate().alpha(0f).setDuration(350).start()
+            backBack.animate().alpha(0f).setDuration(350).start()
+            return
+        }
+        val incoming = backBack
+        RemoteImages.load(url, incoming, resources.displayMetrics.widthPixels / 2) { ok ->
+            if (!ok || backdropUrl != url) return@load
+            backBack = backFront
+            backFront = incoming
+            incoming.bringToFront()
+            incoming.animate().alpha(1f).setDuration(450).start()
+            backBack.animate().alpha(0f).setDuration(450).start()
+            // Keep the gradients and the content above the pictures
+            (incoming.parent as FrameLayout).let { root ->
+                for (i in 0 until root.childCount) {
+                    val child = root.getChildAt(i)
+                    if (child !== backFront && child !== backBack) child.bringToFront()
+                }
+            }
+        }
+    }
+
     // ---------- Rows ----------
 
     private fun loadApps(force: Boolean) {
@@ -317,29 +460,23 @@ class MainActivity : Activity() {
             val folders = apps.associate { it.pkg to Folders.folderOf(this, it.pkg, it.label) }
             val rowOrder = HomePrefs.rowOrder(this)
             val sorted = rowOrder.associateWith { id -> HomePrefs.sortFolder(this, id, apps.filter { folders[it.pkg] == id }) }
-            val featured = HomePrefs.featured(this, apps.map { it.pkg })
             val signature = "s$stremioVersion|" + WatchHistory.list(this).joinToString { it.id + it.position / 60_000 } + WatchNext.entries().size +
-                rowOrder.joinToString { id -> id + ":" + sorted[id]!!.joinToString(",") { it.pkg } } +
-                "|" + featured.joinToString() + "|" + favorites.joinToString()
+                rowOrder.joinToString { id -> id + ":" + sorted[id]!!.joinToString(",") { it.pkg } } + "|" + favorites.joinToString()
             runOnUiThread {
                 if (!force && signature == shownSignature) return@runOnUiThread
                 shownSignature = signature
                 val focused = currentFocus?.tag as? String
                 rows.removeAllViews()
                 val byPkg = apps.associateBy { it.pkg }
-                // Top: Stremio's "continue watching", big
-                featuredRow.removeAllViews()
-                val bigWidth = (resources.displayMetrics.widthPixels - u(7f) - u(2.6f) * 2) / 3
-                if (stremioWatching.isNotEmpty()) {
-                    stremioWatching.take(8).forEach { featuredRow.addView(stremioBigCard(it, bigWidth)) }
-                } else {
-                    featuredRow.addView(stremioHintCard(bigWidth))
-                }
-                // Then new films and series, and the Stremio library
-                if (newMovies.isNotEmpty()) rows.addView(row("Filmes novos", newMovies.take(20).map { stremioPoster(it) }))
-                if (newSeries.isNotEmpty()) rows.addView(row("Séries novas", newSeries.take(20).map { stremioPoster(it) }))
-                genreRows.forEach { (title, items) -> if (items.isNotEmpty()) rows.addView(row(title, items.take(20).map { stremioPoster(it) })) }
-                if (stremioLibrary.isNotEmpty()) rows.addView(row("Minha biblioteca do Stremio", stremioLibrary.take(30).map { stremioPoster(it) }))
+
+                // Stremio first: continue watching (landscape), then posters
+                rows.addView(row("Continuar assistindo",
+                    if (stremioWatching.isNotEmpty()) stremioWatching.take(12).map { stremioWideCard(it) } else listOf(stremioHintCard())))
+                if (newMovies.isNotEmpty()) rows.addView(row("Filmes novos", newMovies.take(MAX_PER_ROW).map { stremioPoster(it) }))
+                if (newSeries.isNotEmpty()) rows.addView(row("Séries novas", newSeries.take(MAX_PER_ROW).map { stremioPoster(it) }))
+                genreRows.forEach { (title, items) -> if (items.isNotEmpty()) rows.addView(row(title, items.take(MAX_PER_ROW).map { stremioPoster(it) })) }
+                if (stremioLibrary.isNotEmpty()) rows.addView(row("Minha biblioteca", stremioLibrary.take(MAX_PER_ROW).map { stremioPoster(it) }))
+
                 val history = WatchHistory.list(this)
                 val watchNext = WatchNext.entries()
                 if (history.isNotEmpty() || watchNext.isNotEmpty()) {
@@ -362,7 +499,7 @@ class MainActivity : Activity() {
                     }))
                 }
                 rows.addView(row("Configurações", settingsTiles()))
-                val target = focused?.let { rowsScroll.findViewWithTag<View>(it) } ?: featuredRow.getChildAt(0) ?: firstCard()
+                val target = focused?.let { rows.findViewWithTag<View>(it) } ?: firstCard()
                 target?.requestFocus()
             }
         }
@@ -380,9 +517,8 @@ class MainActivity : Activity() {
             clipChildren = false
             clipToPadding = false
         }
-        row.addView(text(1.35f, MUTED, bold = true).apply {
-            text = title.uppercase()
-            letterSpacing = 0.1f
+        row.addView(text(1.35f, 0xE6F2F2F7.toInt(), bold = true).apply {
+            text = title
             icon?.let { res ->
                 val d = getDrawable(res)!!.apply { setBounds(0, 0, u(1.5f), u(1.5f)) }
                 setCompoundDrawables(d, null, null, null)
@@ -393,7 +529,7 @@ class MainActivity : Activity() {
             orientation = LinearLayout.HORIZONTAL
             clipChildren = false
             clipToPadding = false
-            setPadding(u(1.5f), u(1.4f), u(1.5f), u(1.4f))
+            setPadding(u(1.5f), u(1.2f), u(1.5f), u(1.6f))
         }
         cards.forEach { strip.addView(it) }
         val scroll = HorizontalScrollView(this).apply {
@@ -404,16 +540,14 @@ class MainActivity : Activity() {
         }
         row.addView(scroll, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply {
             leftMargin = -u(1.5f)
-            bottomMargin = u(0.6f)
+            bottomMargin = u(0.8f)
         })
         return row
     }
 
-    private fun appCard(
-        app: AppInfo, favorite: Boolean, folderTitle: String = "Favoritos", width: Int = u(13.5f), keyPrefix: String = "",
-    ): View =
+    private fun appCard(app: AppInfo, favorite: Boolean, folderTitle: String = "Favoritos"): View =
         card(
-            key = keyPrefix + app.pkg, title = app.label, subtitle = folderTitle, favorite = favorite, width = width,
+            key = app.pkg, title = app.label, subtitle = folderTitle, favorite = favorite,
             bindImage = { loadIcon(app.pkg, it) },
             onOptions = { appOptions(app) },
         ) {
@@ -421,7 +555,7 @@ class MainActivity : Activity() {
             Apps.launch(this, app.pkg)
         }
 
-    // ---------- Stremio on the home ----------
+    // ---------- Stremio ----------
 
     private fun refreshStremio() {
         if (System.currentTimeMillis() - stremioFetchedAt < 5 * 60_000) return
@@ -461,74 +595,77 @@ class MainActivity : Activity() {
         return if (parts.size >= 3) "T${parts[1]} E${parts[2]}" else null
     }
 
-    private fun openInStremio(item: org.json.JSONObject, videoId: String?) {
+    private fun openInStremio(item: JSONObject, videoId: String?) {
         runCatching { Stremio.openOnTv(this, item.optString("type"), item.optString("id"), videoId) }
             .onFailure { toast(it.message ?: "Instale o Stremio na TV") }
     }
 
-    /** Big landscape card for "continue watching": backdrop, title, episode, time left, progress. */
-    private fun stremioBigCard(item: org.json.JSONObject, width: Int): View {
+    /** "Continue watching" card: backdrop with title, episode and time left, plus progress. */
+    private fun stremioWideCard(item: JSONObject): View {
         val id = item.optString("id")
         val duration = item.optLong("duration")
         val left = ((duration - item.optLong("position")) / 60_000).coerceAtLeast(1)
         val episode = episodeLabel(item.optString("videoId").ifEmpty { null })
-        val subtitle = listOfNotNull(episode, if (duration > 0) "faltam $left min" else null).joinToString(" · ")
+        val extra = listOfNotNull(episode, if (duration > 0) "faltam $left min" else null).joinToString(" · ").ifEmpty { null }
+        val w = u(21f)
         return mediaTile(
-            key = "sw:$id", title = item.optString("name"), subtitle = "Continuar no Stremio · $subtitle",
+            key = "sw:$id", item = item, extra = extra,
             imageUrl = "https://images.metahub.space/background/medium/$id/img", fallbackUrl = item.optString("poster"),
-            width = width, height = width * 9 / 16, overlay = listOfNotNull(item.optString("name"), subtitle.ifEmpty { null }).joinToString("\n"),
+            width = w, height = w * 9 / 16, overlay = listOfNotNull(item.optString("name"), extra).joinToString("\n"),
             progress = if (duration > 0) item.optLong("position").toFloat() / duration else null,
         ) { openInStremio(item, item.optString("videoId").ifEmpty { null }) }
     }
 
-    /** Shown in the big row when there's nothing to continue (or no Stremio account yet). */
-    private fun stremioHintCard(width: Int): View = mediaTile(
-        key = "sw:hint", title = "Continuar assistindo",
-        subtitle = if (stremioLoggedIn) "Nada em andamento no Stremio" else "Entre no Stremio pelo celular: aba Filmes",
-        imageUrl = null, fallbackUrl = null, width = width, height = width * 9 / 16,
-        overlay = if (stremioLoggedIn) "Nada em andamento no Stremio" else "Entre na sua conta do Stremio\npelo celular (aba Filmes)",
-        progress = null,
-    ) { packageManager.getLaunchIntentForPackage("com.stremio.one")?.let { startActivity(it) } ?: toast("Instale o Stremio na TV") }
-
-    /** Poster card (2:3) for films and series. */
-    private fun stremioPoster(item: org.json.JSONObject): View {
-        val id = item.optString("id")
-        val kind = if (item.optString("type") == "series") "Série" else "Filme"
-        val year = item.optString("releaseInfo").ifEmpty { item.optString("year") }
-        val w = u(9.2f)
+    /** Shown when there's nothing to continue (or no Stremio account yet). */
+    private fun stremioHintCard(): View {
+        val w = u(21f)
+        val message = if (stremioLoggedIn) "Nada em andamento no Stremio" else "Entre na sua conta do Stremio\npelo celular (aba Filmes)"
         return mediaTile(
-            key = "sp:$id", title = item.optString("name"), subtitle = listOf(kind, year).filter { it.isNotEmpty() }.joinToString(" · ") + " · abre no Stremio",
+            key = "sw:hint", item = null, extra = null, imageUrl = null, fallbackUrl = null,
+            width = w, height = w * 9 / 16, overlay = message, progress = null,
+            textTitle = "Continuar assistindo", textInfo = message.replace("\n", " "),
+        ) { packageManager.getLaunchIntentForPackage("com.stremio.one")?.let { startActivity(it) } ?: toast("Instale o Stremio na TV") }
+    }
+
+    /** Big poster (2:3) for films and series. */
+    private fun stremioPoster(item: JSONObject): View {
+        val id = item.optString("id")
+        val w = u(11.5f)
+        return mediaTile(
+            key = "sp:$id", item = item, extra = null,
             imageUrl = item.optString("poster").ifEmpty { "https://images.metahub.space/poster/medium/$id/img" }, fallbackUrl = null,
             width = w, height = w * 3 / 2, overlay = null, progress = null,
         ) { openInStremio(item, null) }
     }
 
-    /** A focusable picture card with an optional text overlay and progress bar. */
+    /** A focusable picture card; focusing it fills the hero with the title's details. */
     private fun mediaTile(
-        key: String, title: String, subtitle: String, imageUrl: String?, fallbackUrl: String?,
-        width: Int, height: Int, overlay: String?, progress: Float?, onClick: () -> Unit,
+        key: String, item: JSONObject?, extra: String?, imageUrl: String?, fallbackUrl: String?,
+        width: Int, height: Int, overlay: String?, progress: Float?,
+        textTitle: String = "", textInfo: String = "", onClick: () -> Unit,
     ): View {
         val box = FrameLayout(this).apply {
             isFocusable = true
             isFocusableInTouchMode = true
             tag = key
-            layoutParams = LinearLayout.LayoutParams(width, height).apply { rightMargin = u(1.3f) }
+            layoutParams = LinearLayout.LayoutParams(width, height).apply { rightMargin = u(1.2f) }
         }
         val art = FrameLayout(this).apply {
-            background = rounded(SURFACE, u(0.9f).toFloat(), LINE)
+            background = rounded(SURFACE, u(0.8f).toFloat(), LINE)
             outlineProvider = object : ViewOutlineProvider() {
-                override fun getOutline(view: View, outline: Outline) = outline.setRoundRect(0, 0, view.width, view.height, u(0.9f).toFloat())
+                override fun getOutline(view: View, outline: Outline) = outline.setRoundRect(0, 0, view.width, view.height, u(0.8f).toFloat())
             }
             clipToOutline = true
         }
         val image = ImageView(this).apply { scaleType = ImageView.ScaleType.CENTER_CROP }
         art.addView(image, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
-        if (imageUrl != null) RemoteImages.load(imageUrl, image, width) else if (fallbackUrl != null) RemoteImages.load(fallbackUrl, image, width)
+        val primary = imageUrl ?: fallbackUrl
+        RemoteImages.load(primary, image, width) { ok -> if (!ok && fallbackUrl != null && primary != fallbackUrl) RemoteImages.load(fallbackUrl, image, width) }
         if (overlay != null) {
             art.addView(View(this).apply {
                 background = GradientDrawable(GradientDrawable.Orientation.BOTTOM_TOP, intArrayOf(0xE6000000.toInt(), 0x00000000))
             }, FrameLayout.LayoutParams(MATCH_PARENT, height * 2 / 3, Gravity.BOTTOM))
-            art.addView(text(1.2f, TEXT, bold = true).apply {
+            art.addView(text(1.15f, TEXT, bold = true).apply {
                 text = overlay
                 maxLines = 2
                 ellipsize = TextUtils.TruncateAt.END
@@ -541,21 +678,26 @@ class MainActivity : Activity() {
             art.addView(track, FrameLayout.LayoutParams(MATCH_PARENT, maxOf(3, u(0.35f)), Gravity.BOTTOM))
         }
         val ring = View(this).apply {
-            background = GradientDrawable().apply { cornerRadius = u(0.9f).toFloat(); setStroke(u(0.25f), CYAN) }
+            background = GradientDrawable().apply { cornerRadius = u(0.8f).toFloat(); setStroke(u(0.22f), Color.WHITE) }
             visibility = View.INVISIBLE
         }
         art.addView(ring, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
         box.addView(art, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
         box.setOnFocusChangeListener { _, focused ->
             ring.visibility = if (focused) View.VISIBLE else View.INVISIBLE
-            val scale = if (focused) (if (width > u(20f)) 1.05f else 1.1f) else 1f
-            art.animate().scaleX(scale).scaleY(scale).setDuration(130).setInterpolator(DecelerateInterpolator()).start()
+            val scale = if (focused) 1.08f else 1f
+            art.animate().scaleX(scale).scaleY(scale).setDuration(140).setInterpolator(DecelerateInterpolator()).start()
             art.elevation = if (focused) u(1f).toFloat() else 0f
-            if (focused) heroSub.text = "$title   ·   $subtitle"
+            if (focused) {
+                bringRowToTop(box)
+                if (item != null) heroFor(item, extra) else heroText(textTitle, textInfo, "OK abre o Stremio")
+            }
         }
         box.setOnClickListener { onClick() }
         return box
     }
+
+    // ---------- Played on the TV ("Tocar na TV") ----------
 
     private fun historyCard(item: WatchHistory.Item): View {
         val remaining = ((item.duration - item.position) / 60_000).coerceAtLeast(1)
@@ -593,6 +735,8 @@ class MainActivity : Activity() {
             startActivity(Intent.parseUri(entry.intentUri, Intent.URI_INTENT_SCHEME).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         }.onFailure { Apps.launch(this, entry.pkg) }
     }
+
+    // ---------- Search ----------
 
     /** Search in Stremio (titles listed right here), SmartTube and AuraMusic. */
     private inner class SearchDialog : Dialog(this@MainActivity) {
@@ -648,7 +792,7 @@ class MainActivity : Activity() {
             }.also { handler.postDelayed(it, 450) }
         }
 
-        private fun render(text: String, titles: List<org.json.JSONObject>) {
+        private fun render(text: String, titles: List<JSONObject>) {
             results.removeAllViews()
             if (text.isEmpty()) {
                 results.addView(text(1.2f, MUTED).apply { this.text = "Busca filmes e séries no Stremio, vídeos no SmartTube e músicas no AuraMusic" })
@@ -693,10 +837,11 @@ class MainActivity : Activity() {
         }
     }
 
-    /** Fire TV's own screens, as on the Amazon home. Shortcuts the TV doesn't have are left out. */
+    // ---------- Settings row ----------
+
     private fun settingsTiles(): List<View> {
         val tiles = mutableListOf<View>()
-        // Always shown: each one tries several ways into Fire TV's settings app until one opens
+        // Each one tries several ways into Fire TV's settings app until one opens
         SystemShortcuts.SETTINGS.forEach { shortcut ->
             tiles += card(shortcut.key, shortcut.title, "Configurações da TV", false, { it.setImageResource(shortcut.icon) }, iconTile = true) {
                 if (!SystemShortcuts.open(this, shortcut)) toast("Esta TV não abriu essa tela. Veja o diagnóstico nos Ajustes do celular.")
@@ -716,6 +861,7 @@ class MainActivity : Activity() {
         return tiles
     }
 
+    /** App, shortcut and input cards (16:9 banners). */
     private fun card(
         key: String, title: String, subtitle: String, favorite: Boolean, bindImage: (ImageView) -> Unit,
         iconTile: Boolean = false, width: Int = u(13.5f), progress: Float? = null,
@@ -731,10 +877,10 @@ class MainActivity : Activity() {
             clipChildren = false
         }
         val art = FrameLayout(this).apply {
-            background = rounded(SURFACE, u(0.9f).toFloat(), if (favorite) VIOLET_DIM else LINE)
+            background = rounded(SURFACE, u(0.8f).toFloat(), if (favorite) VIOLET_DIM else LINE)
             outlineProvider = object : ViewOutlineProvider() {
                 override fun getOutline(view: View, outline: Outline) =
-                    outline.setRoundRect(0, 0, view.width, view.height, u(0.9f).toFloat())
+                    outline.setRoundRect(0, 0, view.width, view.height, u(0.8f).toFloat())
             }
             clipToOutline = true
         }
@@ -753,28 +899,26 @@ class MainActivity : Activity() {
             }, FrameLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT, Gravity.BOTTOM))
         }
         if (progress != null) {
-            // Watched part of the video, along the bottom edge
             val track = FrameLayout(this).apply { setBackgroundColor(0x99000000.toInt()) }
             track.addView(View(this).apply { setBackgroundColor(CYAN) }, FrameLayout.LayoutParams((w * progress.coerceIn(0f, 1f)).toInt(), MATCH_PARENT))
             art.addView(track, FrameLayout.LayoutParams(MATCH_PARENT, maxOf(3, u(0.35f)), Gravity.BOTTOM))
         }
         val ring = View(this).apply {
             background = GradientDrawable().apply {
-                cornerRadius = u(0.9f).toFloat()
-                setStroke(u(0.25f), CYAN)
+                cornerRadius = u(0.8f).toFloat()
+                setStroke(u(0.22f), Color.WHITE)
             }
             visibility = View.INVISIBLE
         }
         art.addView(ring, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
         box.addView(art, LinearLayout.LayoutParams(w, h))
-        box.layoutParams = LinearLayout.LayoutParams(w, WRAP_CONTENT).apply { rightMargin = u(1.3f) }
+        box.layoutParams = LinearLayout.LayoutParams(w, WRAP_CONTENT).apply { rightMargin = u(1.2f) }
 
         bindImage(image)
 
         box.setOnFocusChangeListener { _, focused ->
             ring.visibility = if (focused) View.VISIBLE else View.INVISIBLE
-            // Big featured tiles grow less, so they don't spill over their neighbours
-            val scale = if (focused) (if (w > u(20f)) 1.05f else 1.12f) else 1f
+            val scale = if (focused) 1.1f else 1f
             AnimatorSet().apply {
                 playTogether(ObjectAnimator.ofFloat(art, View.SCALE_X, scale), ObjectAnimator.ofFloat(art, View.SCALE_Y, scale))
                 duration = 130
@@ -783,7 +927,8 @@ class MainActivity : Activity() {
             }
             art.elevation = if (focused) u(1f).toFloat() else 0f
             if (focused) {
-                heroSub.text = "$title   ·   $subtitle" + if (onOptions != null) "   ·   OK abre   ·   segure OK para opções" else "   ·   OK abre"
+                bringRowToTop(box)
+                heroText(title, subtitle, if (onOptions != null) "OK abre   ·   segure OK para opções" else "OK abre")
             }
         }
         box.setOnClickListener { onClick() }
@@ -807,7 +952,6 @@ class MainActivity : Activity() {
             toast(if (favorite) "${app.label} saiu dos favoritos" else "${app.label} fixado nos favoritos")
             loadApps(force = true)
         }
-        dialog.add("Destacar no topo…") { featurePicker(app) }
         dialog.add("Mover para pasta…") { folderPicker(app) }
         dialog.add("Esconder da tela inicial") {
             HomePrefs.setHidden(this, app.pkg, true)
@@ -837,20 +981,6 @@ class MainActivity : Activity() {
             dialog.add("${app.label}   ·   mostrar de novo") {
                 HomePrefs.setHidden(this, app.pkg, false)
                 toast("${app.label} voltou para a tela inicial")
-                loadApps(force = true)
-            }
-        }
-        dialog.show()
-    }
-
-    private fun featurePicker(app: AppInfo) {
-        val dialog = OptionsDialog("Destacar ${app.label} na posição…")
-        val current = HomePrefs.featured(this, Apps.list(this).map { it.pkg })
-        for (slot in 0 until HomePrefs.FEATURED_SLOTS) {
-            val now = current.getOrNull(slot)?.let { Apps.label(this, it) } ?: "vazio"
-            dialog.add("${slot + 1}  (hoje: $now)") {
-                HomePrefs.setFeatured(this, slot, app.pkg)
-                toast("${app.label} em destaque na posição ${slot + 1}")
                 loadApps(force = true)
             }
         }
@@ -902,101 +1032,47 @@ class MainActivity : Activity() {
         }
     }
 
-    // ---------- Music widget ----------
+    // ---------- Music chip (top bar) ----------
 
-    private fun buildMusicWidget(): View {
-        val box = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            background = rounded(SURFACE, u(1.2f).toFloat(), VIOLET_DIM)
-            setPadding(u(1f), u(1f), u(1f), u(1f))
-        }
-        musicArt = ImageView(this).apply {
-            scaleType = ImageView.ScaleType.CENTER_CROP
-            outlineProvider = object : ViewOutlineProvider() {
-                override fun getOutline(view: View, outline: Outline) = outline.setRoundRect(0, 0, view.width, view.height, u(0.7f).toFloat())
-            }
-            clipToOutline = true
-            setImageResource(R.drawable.ic_m_music)
-        }
-        box.addView(musicArt, LinearLayout.LayoutParams(u(6f), u(6f)))
-        val info = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(u(1f), 0, u(0.6f), 0)
-        }
-        musicTitle = text(1.3f, TEXT, bold = true).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
-        musicArtist = text(1.05f, MUTED).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
-        info.addView(musicTitle)
-        info.addView(musicArtist, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { topMargin = u(0.3f) })
-        musicControls = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(0, u(0.6f), 0, 0)
-        }
-        musicControls.addView(mediaButton(R.drawable.ic_m_prev, false) { MediaListener.current(this)?.transportControls?.skipToPrevious() })
-        musicPlay = mediaButton(R.drawable.ic_m_play, true) {
-            val c = MediaListener.current(this) ?: return@mediaButton
-            if (c.playbackState?.state == PlaybackState.STATE_PLAYING) c.transportControls.pause() else c.transportControls.play()
-            handler.postDelayed({ updateMusic() }, 300)
-        }
-        musicControls.addView(musicPlay)
-        musicControls.addView(mediaButton(R.drawable.ic_m_next, false) { MediaListener.current(this)?.transportControls?.skipToNext() })
-        musicControls.addView(mediaButton(R.drawable.ic_m_search, false) {
-            runCatching { MusicBridge.openSearch(this) }.onFailure { toast(it.message ?: "Sem app de música") }
-        })
-        info.addView(musicControls)
-        musicAction = pillButton("Abrir AuraMusic") { openMusicApp() }.apply { visibility = View.GONE }
-        info.addView(musicAction, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { topMargin = u(0.6f) })
-        box.addView(info, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
-        return box
-    }
-
-    private fun mediaButton(icon: Int, primary: Boolean, onClick: () -> Unit) = ImageView(this).apply {
-        setImageResource(icon)
-        val size = u(if (primary) 3.4f else 2.8f)
-        layoutParams = LinearLayout.LayoutParams(size, size).apply { rightMargin = u(0.8f) }
-        setPadding(u(0.6f), u(0.6f), u(0.6f), u(0.6f))
-        isFocusable = true
-        background = StateListDrawable().apply {
-            addState(intArrayOf(android.R.attr.state_focused), rounded(if (primary) CYAN else 0x4422D3EE, size / 2f, CYAN))
-            addState(intArrayOf(), rounded(if (primary) 0xCCF2F2F7.toInt() else Color.TRANSPARENT, size / 2f, if (primary) Color.TRANSPARENT else LINE))
-        }
-        setOnClickListener { onClick() }
+    /** OK on the chip: play/pause what's playing, or open the music app when nothing is. */
+    private fun musicChipClick() {
+        val controller = MediaListener.current(this)
+        if (controller?.metadata == null) return openMusicApp()
+        if (controller.playbackState?.state == PlaybackState.STATE_PLAYING) controller.transportControls.pause() else controller.transportControls.play()
+        handler.postDelayed({ updateMusic() }, 300)
     }
 
     private fun updateMusic() {
         if (!MediaListener.enabled(this)) {
-            // Turn the widget on by itself as soon as the phone's ADB connection allows it
+            // Turn music reading on by itself as soon as the phone's ADB connection allows it
             if (!askedMusicPermission && Adb.state == Adb.State.OK) {
                 askedMusicPermission = true
                 loader.execute { runCatching { MediaListener.enable() } }
             }
-            showMusic("music:off", "Controles de música", "Conecte o celular para ativar", null, false, showAction = false)
+            showMusicChip("off", "Música", false)
             return
         }
         val controller = MediaListener.current(this)
         val meta = controller?.metadata
-        if (controller == null || meta == null) {
-            showMusic("music:none", "Nada tocando", "Pesquise pelo celular ou abra o AuraMusic", null, false, showAction = true)
+        if (meta == null) {
+            showMusicChip("none", "Música", false)
             return
         }
         val title = meta.getString(MediaMetadata.METADATA_KEY_TITLE) ?: "Música"
-        val artist = meta.getString(MediaMetadata.METADATA_KEY_ARTIST) ?: meta.getString(MediaMetadata.METADATA_KEY_ALBUM) ?: ""
+        val artist = meta.getString(MediaMetadata.METADATA_KEY_ARTIST) ?: ""
         val playing = controller.playbackState?.state == PlaybackState.STATE_PLAYING
-        val art = meta.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART) ?: meta.getBitmap(MediaMetadata.METADATA_KEY_ART)
-        showMusic("$title|$artist|$playing|${art?.generationId}", title, artist, art, playing, showAction = false)
+        showMusicChip("$title|$artist|$playing", if (artist.isNotEmpty()) "$title · $artist" else title, playing)
     }
 
-    private fun showMusic(key: String, title: String, artist: String, art: android.graphics.Bitmap?, playing: Boolean, showAction: Boolean) {
+    private fun showMusicChip(key: String, label: String, playing: Boolean) {
         if (key == musicKey) return
         musicKey = key
-        musicTitle.text = title
-        musicArtist.text = artist
-        if (art != null) musicArt.setImageBitmap(art) else musicArt.setImageResource(R.drawable.ic_m_music)
-        val controls = key.contains('|')
-        musicControls.visibility = if (controls) View.VISIBLE else View.GONE
-        musicAction.visibility = if (showAction) View.VISIBLE else View.GONE
-        musicPlay.setImageResource(if (playing) R.drawable.ic_m_pause else R.drawable.ic_m_play)
+        musicChip.text = label
+        val icon = getDrawable(if (playing) R.drawable.ic_m_music else R.drawable.ic_m_music)!!.mutate().apply {
+            setColorFilter(if (playing) CYAN else 0xFFA855F7.toInt(), PorterDuff.Mode.SRC_IN)
+            setBounds(0, 0, u(1.4f), u(1.4f))
+        }
+        musicChip.setCompoundDrawables(icon, null, null, null)
     }
 
     private fun openMusicApp() {
@@ -1022,17 +1098,21 @@ class MainActivity : Activity() {
         wifiButton.text = SpannableString(label).apply { setSpan(ForegroundColorSpan(if (caps == null) WARN else OK), 0, 1, 0) }
     }
 
-    private fun pillButton(label: String, onClick: () -> Unit) = Button(this).apply {
+    private fun pillButton(label: String, icon: Int?, onClick: () -> Unit) = Button(this).apply {
         text = label
         isAllCaps = false
-        textSize = px(1.1f)
+        textSize = px(1.05f)
         setTextColor(TEXT)
         minHeight = 0
         minimumHeight = 0
-        setPadding(u(1.3f), u(0.6f), u(1.3f), u(0.6f))
+        setPadding(u(1.2f), u(0.55f), u(1.2f), u(0.55f))
+        icon?.let { res ->
+            setCompoundDrawables(getDrawable(res)!!.apply { setBounds(0, 0, u(1.4f), u(1.4f)) }, null, null, null)
+            compoundDrawablePadding = u(0.6f)
+        }
         background = StateListDrawable().apply {
             addState(intArrayOf(android.R.attr.state_focused), rounded(0x3322D3EE, u(3f).toFloat(), CYAN))
-            addState(intArrayOf(), rounded(0xCC12121D.toInt(), u(3f).toFloat(), LINE))
+            addState(intArrayOf(), rounded(0x9912121D.toInt(), u(3f).toFloat(), LINE))
         }
         setOnClickListener { onClick() }
     }
@@ -1062,16 +1142,16 @@ class MainActivity : Activity() {
         clock.text = SimpleDateFormat("HH:mm", Locale.getDefault()).format(now)
         val hour = SimpleDateFormat("H", Locale.getDefault()).format(now).toInt()
         val hello = when { hour < 5 -> "Boa noite"; hour < 12 -> "Bom dia"; hour < 18 -> "Boa tarde"; else -> "Boa noite" }
-        greeting.text = "$hello, ${HomePrefs.name(this)}"
-        date.text = SimpleDateFormat("EEEE, d 'de' MMMM", Locale("pt", "BR")).format(now).replaceFirstChar { it.uppercase() }
+        val date = SimpleDateFormat("EEEE, d 'de' MMMM", Locale("pt", "BR")).format(now)
+        greeting.text = "$hello, ${HomePrefs.name(this)}   ·   $date"
     }
 
     private fun updateStatus() {
         val phoneActive = System.currentTimeMillis() - ControlServer.lastPhoneRequest < 15_000
-        setChip(phoneChip, if (phoneActive) OK else MUTED, if (phoneActive) "Celular conectado" else if (pairing.hasPhones()) "Celular pareado" else "Nenhum celular")
+        setChip(phoneChip, if (phoneActive) OK else MUTED, if (phoneActive) "Celular" else if (pairing.hasPhones()) "Pareado" else "Sem celular")
         val (color, label) = when (Adb.state) {
             Adb.State.OK -> OK to "Controle total"
-            Adb.State.WAITING -> WARN to "Aceite \"Permitir depuração\""
+            Adb.State.WAITING -> WARN to "Aceite a depuração"
             Adb.State.OFF -> MUTED to "Controle básico"
         }
         setChip(adbChip, color, label)
@@ -1128,9 +1208,9 @@ class MainActivity : Activity() {
         includeFontPadding = false
     }
 
-    private fun chip() = text(1.05f, MUTED).apply {
-        background = rounded(0xCC12121D.toInt(), u(3f).toFloat(), LINE)
-        setPadding(u(1.2f), u(0.6f), u(1.2f), u(0.6f))
+    private fun chip() = text(0.95f, MUTED).apply {
+        background = rounded(0x9912121D.toInt(), u(3f).toFloat(), LINE)
+        setPadding(u(1f), u(0.5f), u(1f), u(0.5f))
     }
 
     private fun rounded(fill: Int, radius: Float, stroke: Int) = GradientDrawable().apply {
@@ -1175,13 +1255,16 @@ class MainActivity : Activity() {
         private val OK = Color.parseColor("#34D399")
         private val WARN = Color.parseColor("#FBBF24")
 
+        /** Fewer, bigger posters per row. */
+        private const val MAX_PER_ROW = 12
+
+        /** Genre rows on the home (title shown, Stremio genre name). */
+        private val GENRES = listOf("Comédia" to "Comedy", "Ficção científica" to "Sci-Fi", "Drama" to "Drama")
+
         /** Whether the home is on screen (music search brings it back afterwards). */
         @Volatile
         var visible = false
             private set
-
-        /** Genre rows on the home (title shown, Stremio genre name). */
-        private val GENRES = listOf("Comédia" to "Comedy", "Ficção científica" to "Sci-Fi", "Drama" to "Drama")
 
         /** App artwork, kept in memory so going back home never reloads it. */
         private val icons = ConcurrentHashMap<String, Drawable>()

@@ -22,15 +22,20 @@ object RemoteImages {
         override fun sizeOf(key: String, value: Bitmap) = value.byteCount
     }
 
-    fun load(url: String?, into: ImageView, width: Int) {
-        if (url.isNullOrBlank()) return
+    /** [onDone] runs on the main thread with true once the picture is shown, false if it failed. */
+    fun load(url: String?, into: ImageView, width: Int, onDone: ((Boolean) -> Unit)? = null) {
+        if (url.isNullOrBlank()) { onDone?.invoke(false); return }
         into.tag = url
-        cache.get(url)?.let { into.setImageBitmap(it); return }
+        cache.get(url)?.let { into.setImageBitmap(it); onDone?.invoke(true); return }
         pool.execute {
-            val bitmap = runCatching { fetch(url, width) }.getOrNull() ?: return@execute
-            cache.put(url, bitmap)
+            val bitmap = runCatching { fetch(url, width) }.getOrNull()
+            if (bitmap != null) cache.put(url, bitmap)
             // The view may have been reused for another picture meanwhile
-            main.post { if (into.tag == url) into.setImageBitmap(bitmap) }
+            main.post {
+                if (into.tag != url) return@post
+                if (bitmap != null) into.setImageBitmap(bitmap)
+                onDone?.invoke(bitmap != null)
+            }
         }
     }
 
@@ -42,6 +47,7 @@ object RemoteImages {
             conn.readTimeout = 15_000
             conn.instanceFollowRedirects = false
             conn.setRequestProperty("User-Agent", "Mozilla/5.0 ControleTV")
+            if (conn.responseCode >= 400) { conn.disconnect(); return null }
             if (conn.responseCode in 300..399) {
                 current = URL(current, conn.getHeaderField("Location"))
                 conn.disconnect()
