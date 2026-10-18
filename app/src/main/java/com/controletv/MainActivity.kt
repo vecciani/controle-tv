@@ -97,6 +97,15 @@ class MainActivity : Activity() {
     private lateinit var updateButton: Button
 
     private var shownSignature = ""
+
+    // Stremio content for the top of the home, refreshed in the background every few minutes
+    private var stremioLoggedIn = false
+    private var stremioWatching: List<org.json.JSONObject> = emptyList()
+    private var stremioLibrary: List<org.json.JSONObject> = emptyList()
+    private var newMovies: List<org.json.JSONObject> = emptyList()
+    private var newSeries: List<org.json.JSONObject> = emptyList()
+    private var stremioFetchedAt = 0L
+    private var stremioVersion = 0
     private var shownUrl: String? = null
     private var lastMinute = -1
     private var shownChanges = -1
@@ -130,6 +139,7 @@ class MainActivity : Activity() {
     override fun onResume() {
         super.onResume()
         visible = true
+        refreshStremio()
         loadApps(force = false)
         handler.post(tick)
     }
@@ -193,7 +203,7 @@ class MainActivity : Activity() {
 
         // Search bar: apps, music in AuraMusic, videos on YouTube
         val searchBar = Button(this).apply {
-            text = "Pesquisar apps, músicas e vídeos…"
+            text = "Pesquisar no Stremio, SmartTube e AuraMusic…"
             isAllCaps = false
             textSize = px(1.3f)
             setTextColor(MUTED)
@@ -307,7 +317,7 @@ class MainActivity : Activity() {
             val rowOrder = HomePrefs.rowOrder(this)
             val sorted = rowOrder.associateWith { id -> HomePrefs.sortFolder(this, id, apps.filter { folders[it.pkg] == id }) }
             val featured = HomePrefs.featured(this, apps.map { it.pkg })
-            val signature = WatchHistory.list(this).joinToString { it.id + it.position / 60_000 } + WatchNext.entries().size +
+            val signature = "s$stremioVersion|" + WatchHistory.list(this).joinToString { it.id + it.position / 60_000 } + WatchNext.entries().size +
                 rowOrder.joinToString { id -> id + ":" + sorted[id]!!.joinToString(",") { it.pkg } } +
                 "|" + featured.joinToString() + "|" + favorites.joinToString()
             runOnUiThread {
@@ -316,15 +326,22 @@ class MainActivity : Activity() {
                 val focused = currentFocus?.tag as? String
                 rows.removeAllViews()
                 val byPkg = apps.associateBy { it.pkg }
+                // Top: Stremio's "continue watching", big
                 featuredRow.removeAllViews()
-                val featuredWidth = (resources.displayMetrics.widthPixels - u(7f) - u(2.6f) * 2) / HomePrefs.FEATURED_SLOTS
-                featured.mapNotNull { byPkg[it] }.forEach { app ->
-                    featuredRow.addView(appCard(app, app.pkg in favorites, Folders.ALL.firstOrNull { it.id == folders[app.pkg] }?.title ?: "Destaque", featuredWidth, "feat:"))
+                val bigWidth = (resources.displayMetrics.widthPixels - u(7f) - u(2.6f) * 2) / 3
+                if (stremioWatching.isNotEmpty()) {
+                    stremioWatching.take(8).forEach { featuredRow.addView(stremioBigCard(it, bigWidth)) }
+                } else {
+                    featuredRow.addView(stremioHintCard(bigWidth))
                 }
+                // Then new films and series, and the Stremio library
+                if (newMovies.isNotEmpty()) rows.addView(row("Filmes novos", newMovies.take(20).map { stremioPoster(it) }))
+                if (newSeries.isNotEmpty()) rows.addView(row("Séries novas", newSeries.take(20).map { stremioPoster(it) }))
+                if (stremioLibrary.isNotEmpty()) rows.addView(row("Minha biblioteca do Stremio", stremioLibrary.take(30).map { stremioPoster(it) }))
                 val history = WatchHistory.list(this)
                 val watchNext = WatchNext.entries()
                 if (history.isNotEmpty() || watchNext.isNotEmpty()) {
-                    rows.addView(row("Continuar assistindo", history.map { historyCard(it) } + watchNext.map { watchNextCard(it) }))
+                    rows.addView(row("Continuar no Tocar na TV", history.map { historyCard(it) } + watchNext.map { watchNextCard(it) }))
                 }
                 if (favorites.isNotEmpty()) {
                     rows.addView(row("Favoritos", favorites.mapNotNull { byPkg[it] }.map { appCard(it, true) }, R.drawable.ic_star))
@@ -394,6 +411,135 @@ class MainActivity : Activity() {
             Apps.launch(this, app.pkg)
         }
 
+    // ---------- Stremio on the home ----------
+
+    private fun refreshStremio() {
+        if (System.currentTimeMillis() - stremioFetchedAt < 5 * 60_000) return
+        stremioFetchedAt = System.currentTimeMillis()
+        loader.execute {
+            val loggedIn = Stremio.status(this).optBoolean("loggedIn")
+            val library = if (loggedIn) runCatching { Stremio.library(this) }.getOrNull() else null
+            val items = library?.let { a -> List(a.length()) { a.getJSONObject(it) } }.orEmpty()
+            val year = java.util.Calendar.getInstance().get(java.util.Calendar.YEAR)
+            fun catalog(type: String) = runCatching { Stremio.newReleases(type, year) }.getOrDefault(emptyList())
+            val movies = catalog("movie")
+            val series = catalog("series")
+            runOnUiThread {
+                stremioLoggedIn = loggedIn
+                stremioLibrary = items
+                stremioWatching = items.filter {
+                    val d = it.optLong("duration"); val p = it.optLong("position")
+                    d > 0 && p > 0 && p.toFloat() / d < 0.95f
+                }
+                newMovies = movies
+                newSeries = series
+                stremioVersion++
+                loadApps(force = false)
+            }
+        }
+    }
+
+    private fun episodeLabel(videoId: String?): String? {
+        val parts = videoId?.split(':') ?: return null
+        return if (parts.size >= 3) "T${parts[1]} E${parts[2]}" else null
+    }
+
+    private fun openInStremio(item: org.json.JSONObject, videoId: String?) {
+        runCatching { Stremio.openOnTv(this, item.optString("type"), item.optString("id"), videoId) }
+            .onFailure { toast(it.message ?: "Instale o Stremio na TV") }
+    }
+
+    /** Big landscape card for "continue watching": backdrop, title, episode, time left, progress. */
+    private fun stremioBigCard(item: org.json.JSONObject, width: Int): View {
+        val id = item.optString("id")
+        val duration = item.optLong("duration")
+        val left = ((duration - item.optLong("position")) / 60_000).coerceAtLeast(1)
+        val episode = episodeLabel(item.optString("videoId").ifEmpty { null })
+        val subtitle = listOfNotNull(episode, if (duration > 0) "faltam $left min" else null).joinToString(" · ")
+        return mediaTile(
+            key = "sw:$id", title = item.optString("name"), subtitle = "Continuar no Stremio · $subtitle",
+            imageUrl = "https://images.metahub.space/background/medium/$id/img", fallbackUrl = item.optString("poster"),
+            width = width, height = width * 9 / 16, overlay = listOfNotNull(item.optString("name"), subtitle.ifEmpty { null }).joinToString("\n"),
+            progress = if (duration > 0) item.optLong("position").toFloat() / duration else null,
+        ) { openInStremio(item, item.optString("videoId").ifEmpty { null }) }
+    }
+
+    /** Shown in the big row when there's nothing to continue (or no Stremio account yet). */
+    private fun stremioHintCard(width: Int): View = mediaTile(
+        key = "sw:hint", title = "Continuar assistindo",
+        subtitle = if (stremioLoggedIn) "Nada em andamento no Stremio" else "Entre no Stremio pelo celular: aba Filmes",
+        imageUrl = null, fallbackUrl = null, width = width, height = width * 9 / 16,
+        overlay = if (stremioLoggedIn) "Nada em andamento no Stremio" else "Entre na sua conta do Stremio\npelo celular (aba Filmes)",
+        progress = null,
+    ) { packageManager.getLaunchIntentForPackage("com.stremio.one")?.let { startActivity(it) } ?: toast("Instale o Stremio na TV") }
+
+    /** Poster card (2:3) for films and series. */
+    private fun stremioPoster(item: org.json.JSONObject): View {
+        val id = item.optString("id")
+        val kind = if (item.optString("type") == "series") "Série" else "Filme"
+        val year = item.optString("releaseInfo").ifEmpty { item.optString("year") }
+        val w = u(9.2f)
+        return mediaTile(
+            key = "sp:$id", title = item.optString("name"), subtitle = listOf(kind, year).filter { it.isNotEmpty() }.joinToString(" · ") + " · abre no Stremio",
+            imageUrl = item.optString("poster").ifEmpty { "https://images.metahub.space/poster/medium/$id/img" }, fallbackUrl = null,
+            width = w, height = w * 3 / 2, overlay = null, progress = null,
+        ) { openInStremio(item, null) }
+    }
+
+    /** A focusable picture card with an optional text overlay and progress bar. */
+    private fun mediaTile(
+        key: String, title: String, subtitle: String, imageUrl: String?, fallbackUrl: String?,
+        width: Int, height: Int, overlay: String?, progress: Float?, onClick: () -> Unit,
+    ): View {
+        val box = FrameLayout(this).apply {
+            isFocusable = true
+            isFocusableInTouchMode = true
+            tag = key
+            layoutParams = LinearLayout.LayoutParams(width, height).apply { rightMargin = u(1.3f) }
+        }
+        val art = FrameLayout(this).apply {
+            background = rounded(SURFACE, u(0.9f).toFloat(), LINE)
+            outlineProvider = object : ViewOutlineProvider() {
+                override fun getOutline(view: View, outline: Outline) = outline.setRoundRect(0, 0, view.width, view.height, u(0.9f).toFloat())
+            }
+            clipToOutline = true
+        }
+        val image = ImageView(this).apply { scaleType = ImageView.ScaleType.CENTER_CROP }
+        art.addView(image, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+        if (imageUrl != null) RemoteImages.load(imageUrl, image, width) else if (fallbackUrl != null) RemoteImages.load(fallbackUrl, image, width)
+        if (overlay != null) {
+            art.addView(View(this).apply {
+                background = GradientDrawable(GradientDrawable.Orientation.BOTTOM_TOP, intArrayOf(0xE6000000.toInt(), 0x00000000))
+            }, FrameLayout.LayoutParams(MATCH_PARENT, height * 2 / 3, Gravity.BOTTOM))
+            art.addView(text(1.2f, TEXT, bold = true).apply {
+                text = overlay
+                maxLines = 2
+                ellipsize = TextUtils.TruncateAt.END
+                setPadding(u(1f), 0, u(1f), u(1f))
+            }, FrameLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT, Gravity.BOTTOM))
+        }
+        if (progress != null) {
+            val track = FrameLayout(this).apply { setBackgroundColor(0x99000000.toInt()) }
+            track.addView(View(this).apply { setBackgroundColor(CYAN) }, FrameLayout.LayoutParams((width * progress.coerceIn(0f, 1f)).toInt(), MATCH_PARENT))
+            art.addView(track, FrameLayout.LayoutParams(MATCH_PARENT, maxOf(3, u(0.35f)), Gravity.BOTTOM))
+        }
+        val ring = View(this).apply {
+            background = GradientDrawable().apply { cornerRadius = u(0.9f).toFloat(); setStroke(u(0.25f), CYAN) }
+            visibility = View.INVISIBLE
+        }
+        art.addView(ring, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+        box.addView(art, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+        box.setOnFocusChangeListener { _, focused ->
+            ring.visibility = if (focused) View.VISIBLE else View.INVISIBLE
+            val scale = if (focused) (if (width > u(20f)) 1.05f else 1.1f) else 1f
+            art.animate().scaleX(scale).scaleY(scale).setDuration(130).setInterpolator(DecelerateInterpolator()).start()
+            art.elevation = if (focused) u(1f).toFloat() else 0f
+            if (focused) heroSub.text = "$title   ·   $subtitle"
+        }
+        box.setOnClickListener { onClick() }
+        return box
+    }
+
     private fun historyCard(item: WatchHistory.Item): View {
         val remaining = ((item.duration - item.position) / 60_000).coerceAtLeast(1)
         return card(
@@ -431,29 +577,13 @@ class MainActivity : Activity() {
         }.onFailure { Apps.launch(this, entry.pkg) }
     }
 
-    /** Search everything from one place: installed apps, music (AuraMusic) and YouTube. */
+    /** Search in Stremio (titles listed right here), SmartTube and AuraMusic. */
     private inner class SearchDialog : Dialog(this@MainActivity) {
         private val results = LinearLayout(this@MainActivity).apply { orientation = LinearLayout.VERTICAL }
-        private val apps = Apps.list(this@MainActivity).filter { it.pkg !in HomePrefs.hidden(this@MainActivity) }
-
-        /**
-         * Apps that accept a search from outside (Android's standard ACTION_SEARCH), so the query
-         * can be handed to them — film apps first. Netflix also opens its own search link.
-         */
-        private val searchable: List<Pair<String, (String) -> Intent>> = run {
-            val pm = packageManager
-            val visible = apps.map { it.pkg }.toSet()
-            val standard = pm.queryIntentActivities(Intent(Intent.ACTION_SEARCH), 0)
-                .map { it.activityInfo.packageName }
-                .filter { it in visible && it != packageName }
-                .distinct()
-                .map { pkg -> pkg to { q: String -> Intent(Intent.ACTION_SEARCH).setPackage(pkg).putExtra(android.app.SearchManager.QUERY, q) } }
-            val netflix = "com.netflix.ninja".takeIf { pkg ->
-                pkg in visible && Intent(Intent.ACTION_VIEW, Uri.parse("https://www.netflix.com/search?q=x")).setPackage(pkg).resolveActivity(pm) != null
-            }?.let { pkg -> listOf(pkg to { q: String -> Intent(Intent.ACTION_VIEW, Uri.parse("https://www.netflix.com/search?q=" + Uri.encode(q))).setPackage(pkg) }) }.orEmpty()
-            (netflix + standard.filter { it.first != "com.netflix.ninja" || netflix.isEmpty() })
-                .sortedBy { if (Folders.folderOf(this@MainActivity, it.first, Apps.label(this@MainActivity, it.first)) == "filmes") 0 else 1 }
-        }
+        private val smartTube = listOf("com.teamsmart.videomanager.tv", "com.liskovsoft.smarttubetv.beta", "com.liskovsoft.smarttubetv")
+            .firstOrNull { pkg -> packageManager.getLaunchIntentForPackage(pkg) != null || packageManager.getLeanbackLaunchIntentForPackage(pkg) != null }
+        private var pending: Runnable? = null
+        private var query = ""
 
         init {
             requestWindowFeature(Window.FEATURE_NO_TITLE)
@@ -463,7 +593,7 @@ class MainActivity : Activity() {
                 setPadding(u(2f), u(1.8f), u(2f), u(1.8f))
             }
             val field = EditText(this@MainActivity).apply {
-                hint = "Digite (ou use o Teclado do celular)"
+                hint = "Filmes e séries, vídeos ou músicas"
                 setHintTextColor(MUTED)
                 setTextColor(TEXT)
                 textSize = px(1.6f)
@@ -473,47 +603,59 @@ class MainActivity : Activity() {
                 addTextChangedListener(object : TextWatcher {
                     override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
                     override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
-                    override fun afterTextChanged(s: Editable?) = render(s.toString().trim())
+                    override fun afterTextChanged(s: Editable?) = schedule(s.toString().trim())
                 })
             }
             box.addView(field, LinearLayout.LayoutParams(u(42f), WRAP_CONTENT).apply { bottomMargin = u(1.2f) })
             box.addView(ScrollView(this@MainActivity).apply { addView(results) }, LinearLayout.LayoutParams(u(42f), u(26f)))
             setContentView(box)
             window?.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
-            render("")
+            render("", emptyList())
         }
 
-        private fun render(query: String) {
+        /** Waits for a pause in typing, then looks the titles up in Stremio's catalog. */
+        private fun schedule(text: String) {
+            query = text
+            pending?.let { handler.removeCallbacks(it) }
+            render(text, emptyList())
+            if (text.length < 2) return
+            pending = Runnable {
+                loader.execute {
+                    val titles = runCatching {
+                        val movies = Stremio.catalog("movie", text)
+                        val series = Stremio.catalog("series", text)
+                        (List(minOf(4, movies.length())) { movies.getJSONObject(it) } + List(minOf(4, series.length())) { series.getJSONObject(it) })
+                    }.getOrDefault(emptyList())
+                    runOnUiThread { if (query == text && isShowing) render(text, titles) }
+                }
+            }.also { handler.postDelayed(it, 450) }
+        }
+
+        private fun render(text: String, titles: List<org.json.JSONObject>) {
             results.removeAllViews()
-            if (query.isEmpty()) {
-                val where = searchable.joinToString(", ") { Apps.label(this@MainActivity, it.first) }
-                results.addView(text(1.2f, MUTED).apply {
-                    text = "Apps, músicas no AuraMusic, vídeos no YouTube" + if (where.isNotEmpty()) " e dentro de: $where" else ""
-                })
+            if (text.isEmpty()) {
+                results.addView(text(1.2f, MUTED).apply { this.text = "Busca filmes e séries no Stremio, vídeos no SmartTube e músicas no AuraMusic" })
                 return
             }
-            searchable.forEach { (pkg, intentFor) ->
-                option("Buscar \"$query\" no ${Apps.label(this@MainActivity, pkg)}") {
-                    runCatching { startActivity(intentFor(query).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
-                        .onFailure { toast("Esse app não aceitou a busca") }
+            titles.forEach { t ->
+                val kind = if (t.optString("type") == "series") "série" else "filme"
+                val year = t.optString("releaseInfo")
+                option("${t.optString("name")}  ($kind${if (year.isNotEmpty()) ", $year" else ""})  ·  abrir no Stremio") { openInStremio(t, null) }
+            }
+            if (smartTube != null) {
+                option("Buscar \"$text\" no SmartTube") {
+                    val search = Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/results?search_query=" + Uri.encode(text))).setPackage(smartTube)
+                    runCatching { startActivity(search.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }.onFailure { Apps.launch(this@MainActivity, smartTube) }
                 }
             }
             if (MusicBridge.musicApp(this@MainActivity) != null) {
-                option("Tocar \"$query\" no AuraMusic") {
+                option("Tocar \"$text\" no AuraMusic") {
                     // Searching goes over the network: off the main thread
                     Thread {
-                        runCatching { MusicBridge.search(this@MainActivity, query, true) }
+                        runCatching { MusicBridge.search(this@MainActivity, text, true) }
                             .onFailure { e -> runOnUiThread { toast(e.message ?: "Falhou") } }
                     }.start()
                 }
-            }
-            option("Buscar \"$query\" no YouTube") {
-                runCatching {
-                    startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/results?search_query=" + Uri.encode(query))).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                }.onFailure { toast("Nenhum app de YouTube instalado") }
-            }
-            apps.filter { it.label.contains(query, ignoreCase = true) }.take(8).forEach { app ->
-                option("Abrir ${app.label}") { Apps.launch(this@MainActivity, app.pkg) }
             }
         }
 
@@ -942,6 +1084,7 @@ class MainActivity : Activity() {
         updateWifi()
         updateMusic()
         if (Adb.state == Adb.State.OK) loader.execute { WatchNext.refresh() }
+        refreshStremio()
 
         // The layout may have been changed from the phone
         if (HomePrefs.changes != shownChanges) {

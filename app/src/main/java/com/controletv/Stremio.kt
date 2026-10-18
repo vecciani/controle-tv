@@ -72,6 +72,13 @@ object Stremio {
         return get("$CATALOG/catalog/$safeType/$path.json").optJSONArray("metas") ?: JSONArray()
     }
 
+    /** This year's releases ("Filmes novos", "Séries novas"), as plain objects. */
+    fun newReleases(type: String, year: Int): List<JSONObject> {
+        val safeType = if (type == "series") "series" else "movie"
+        val metas = get("$CATALOG/catalog/$safeType/year/genre=$year.json").optJSONArray("metas") ?: JSONArray()
+        return List(metas.length()) { metas.getJSONObject(it) }
+    }
+
     fun meta(type: String, id: String): JSONObject {
         if (!Regex("tt\\d+|[a-z0-9:_-]+").matches(id)) throw IllegalArgumentException("Título inválido")
         val safeType = if (type == "series") "series" else "movie"

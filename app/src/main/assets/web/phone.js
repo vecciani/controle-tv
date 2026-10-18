@@ -1733,7 +1733,7 @@ function renderLayoutEditor() {
     wrap.append(head, list);
     return wrap;
   };
-  body.append(section('featured', 'Destaques (até 3)', layoutModel.featured, { featured: true }));
+  // The big row at the top of the TV now shows Stremio's "continue watching", not chosen apps
   layoutModel.rows.forEach((r, i) => body.append(section(r.id, r.title, r.apps, { rowIndex: i })));
   body.append(section('hidden', 'Escondidos', layoutModel.hidden));
 }
