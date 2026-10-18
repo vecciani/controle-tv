@@ -81,7 +81,13 @@ class MainActivity : Activity() {
     private lateinit var phoneChip: TextView
     private lateinit var adbChip: TextView
     private lateinit var wifiButton: Button
-    private lateinit var musicChip: Button
+    private lateinit var date: TextView
+    private lateinit var musicArt: ImageView
+    private lateinit var musicTitle: TextView
+    private lateinit var musicArtist: TextView
+    private lateinit var musicControls: LinearLayout
+    private lateinit var musicPlay: ImageView
+    private lateinit var musicAction: Button
     private var musicKey = ""
     private var askedMusicPermission = false
 
@@ -204,8 +210,8 @@ class MainActivity : Activity() {
             background = GradientDrawable(GradientDrawable.Orientation.BOTTOM_TOP, intArrayOf(0xFF07070C.toInt(), 0xD907070C.toInt(), 0x0007070C))
         }, FrameLayout.LayoutParams(backW, fadeH, Gravity.TOP or Gravity.END).apply { topMargin = backH - fadeH })
         root.addView(View(this).apply {
-            background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(0xB307070C.toInt(), 0x0007070C))
-        }, FrameLayout.LayoutParams(MATCH_PARENT, (screenH * 0.16f).toInt(), Gravity.TOP))
+            background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(0xE607070C.toInt(), 0x9907070C.toInt(), 0x0007070C))
+        }, FrameLayout.LayoutParams(MATCH_PARENT, (screenH * 0.30f).toInt(), Gravity.TOP))
 
         val content = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -214,36 +220,63 @@ class MainActivity : Activity() {
             clipToPadding = false
         }
 
-        // Top bar: greeting on the left; search, music, status, clock and Wi-Fi on the right
+        // Top bar: search on the left; status, clock and the Wi-Fi button on the right
         val top = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        greeting = text(1.35f, 0xDDF2F2F7.toInt(), bold = true).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
-        top.addView(greeting, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
-        top.addView(pillButton("Pesquisar", R.drawable.ic_m_search) { SearchDialog().show() },
-            LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { rightMargin = u(0.8f) })
-        musicChip = pillButton("Música", R.drawable.ic_m_music) { musicChipClick() }.apply {
-            maxWidth = u(22f)
+        val searchBar = Button(this).apply {
+            text = "Pesquisar no Stremio, SmartTube e AuraMusic…"
+            isAllCaps = false
+            textSize = px(1.2f)
+            setTextColor(MUTED)
             isSingleLine = true
             ellipsize = TextUtils.TruncateAt.END
-            setOnLongClickListener {
-                runCatching { MusicBridge.openSearch(this@MainActivity) }.onFailure { toast(it.message ?: "Sem app de música") }
-                true
+            gravity = Gravity.START or Gravity.CENTER_VERTICAL
+            minHeight = 0
+            minimumHeight = 0
+            setPadding(u(1.5f), u(0.75f), u(1.5f), u(0.75f))
+            val icon = getDrawable(R.drawable.ic_m_search)!!.apply { setBounds(0, 0, u(1.5f), u(1.5f)) }
+            setCompoundDrawables(icon, null, null, null)
+            compoundDrawablePadding = u(1f)
+            background = StateListDrawable().apply {
+                addState(intArrayOf(android.R.attr.state_focused), rounded(0x3322D3EE, u(3f).toFloat(), CYAN))
+                addState(intArrayOf(), rounded(0xCC12121D.toInt(), u(3f).toFloat(), LINE))
             }
+            setOnClickListener { SearchDialog().show() }
         }
-        top.addView(musicChip, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { rightMargin = u(1.2f) })
+        top.addView(searchBar, LinearLayout.LayoutParams(u(36f), WRAP_CONTENT))
+        top.addView(View(this), LinearLayout.LayoutParams(0, 0, 1f))
         phoneChip = chip()
         adbChip = chip()
-        top.addView(phoneChip, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { rightMargin = u(0.6f) })
-        top.addView(adbChip, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { rightMargin = u(1.2f) })
-        clock = text(1.9f, TEXT, bold = true)
-        top.addView(clock, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { rightMargin = u(1.2f) })
+        top.addView(phoneChip, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { rightMargin = u(0.8f) })
+        top.addView(adbChip, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { rightMargin = u(1.6f) })
+        clock = text(2.2f, TEXT, bold = true)
+        top.addView(clock, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { rightMargin = u(1.6f) })
         wifiButton = pillButton("Wi-Fi", null) {
             if (!SystemShortcuts.open(this, SystemShortcuts.SETTINGS.first { it.key == "set:net" })) toast("Esta TV não abriu a tela de rede")
         }
         top.addView(wifiButton)
         content.addView(top)
+
+        // Greeting and date on the left, music player on the right
+        val header = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        val hello = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        greeting = text(3.0f, TEXT, bold = true).apply {
+            letterSpacing = -0.02f
+            maxLines = 1
+            ellipsize = TextUtils.TruncateAt.END
+            setShadowLayer(u(1f).toFloat(), 0f, 0f, 0x5522D3EE)
+        }
+        date = text(1.35f, MUTED)
+        hello.addView(greeting)
+        hello.addView(date, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { topMargin = u(0.5f) })
+        header.addView(hello, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+        header.addView(buildMusicWidget(), LinearLayout.LayoutParams(u(34f), WRAP_CONTENT))
+        content.addView(header, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = u(1.2f) })
 
         // Hero: logo (or title), rating · year · length · genres, synopsis, hint
         val hero = LinearLayout(this).apply {
@@ -255,7 +288,7 @@ class MainActivity : Activity() {
             adjustViewBounds = true
             visibility = View.GONE
         }
-        hero.addView(heroLogo, LinearLayout.LayoutParams(u(28f), (screenH * 0.11f).toInt()))
+        hero.addView(heroLogo, LinearLayout.LayoutParams(u(26f), (screenH * 0.10f).toInt()))
         heroTitle = text(3.6f, TEXT, bold = true).apply {
             maxLines = 2
             ellipsize = TextUtils.TruncateAt.END
@@ -286,16 +319,16 @@ class MainActivity : Activity() {
         }
         hero.addView(heroAwards, LinearLayout.LayoutParams(u(55f), WRAP_CONTENT).apply { topMargin = u(0.7f) })
         heroDesc = text(1.3f, 0xCCF2F2F7.toInt()).apply {
-            maxLines = 3
+            maxLines = 2
             ellipsize = TextUtils.TruncateAt.END
             setLineSpacing(0f, 1.15f)
         }
-        hero.addView(heroDesc, LinearLayout.LayoutParams(u(46f), WRAP_CONTENT).apply { topMargin = u(0.8f) })
+        hero.addView(heroDesc, LinearLayout.LayoutParams(u(52f), WRAP_CONTENT).apply { topMargin = u(0.8f) })
         heroCredits = text(1.0f, MUTED).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
         hero.addView(heroCredits, LinearLayout.LayoutParams(u(50f), WRAP_CONTENT).apply { topMargin = u(0.7f) })
         heroHint = text(1.05f, CYAN)
         hero.addView(heroHint, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { topMargin = u(0.9f) })
-        content.addView(hero, LinearLayout.LayoutParams(MATCH_PARENT, (screenH * 0.42f).toInt()))
+        content.addView(hero, LinearLayout.LayoutParams(MATCH_PARENT, (screenH * 0.34f).toInt()))
 
         // Rows: the focused one slides up under the hero (see bringRowToTop)
         rows = LinearLayout(this).apply {
@@ -1092,44 +1125,99 @@ class MainActivity : Activity() {
     // ---------- Music chip (top bar) ----------
 
     /** OK on the chip: play/pause what's playing, or open the music app when nothing is. */
-    private fun musicChipClick() {
-        val controller = MediaListener.current(this)
-        if (controller?.metadata == null) return openMusicApp()
-        if (controller.playbackState?.state == PlaybackState.STATE_PLAYING) controller.transportControls.pause() else controller.transportControls.play()
-        handler.postDelayed({ updateMusic() }, 300)
+    private fun buildMusicWidget(): View {
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            background = rounded(SURFACE, u(1.2f).toFloat(), VIOLET_DIM)
+            setPadding(u(1f), u(1f), u(1f), u(1f))
+        }
+        musicArt = ImageView(this).apply {
+            scaleType = ImageView.ScaleType.CENTER_CROP
+            outlineProvider = object : ViewOutlineProvider() {
+                override fun getOutline(view: View, outline: Outline) = outline.setRoundRect(0, 0, view.width, view.height, u(0.7f).toFloat())
+            }
+            clipToOutline = true
+            setImageResource(R.drawable.ic_m_music)
+        }
+        box.addView(musicArt, LinearLayout.LayoutParams(u(6f), u(6f)))
+        val info = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(u(1f), 0, u(0.6f), 0)
+        }
+        musicTitle = text(1.3f, TEXT, bold = true).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
+        musicArtist = text(1.05f, MUTED).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
+        info.addView(musicTitle)
+        info.addView(musicArtist, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { topMargin = u(0.3f) })
+        musicControls = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, u(0.6f), 0, 0)
+        }
+        musicControls.addView(mediaButton(R.drawable.ic_m_prev, false) { MediaListener.current(this)?.transportControls?.skipToPrevious() })
+        musicPlay = mediaButton(R.drawable.ic_m_play, true) {
+            val c = MediaListener.current(this) ?: return@mediaButton
+            if (c.playbackState?.state == PlaybackState.STATE_PLAYING) c.transportControls.pause() else c.transportControls.play()
+            handler.postDelayed({ updateMusic() }, 300)
+        }
+        musicControls.addView(musicPlay)
+        musicControls.addView(mediaButton(R.drawable.ic_m_next, false) { MediaListener.current(this)?.transportControls?.skipToNext() })
+        musicControls.addView(mediaButton(R.drawable.ic_m_search, false) {
+            runCatching { MusicBridge.openSearch(this) }.onFailure { toast(it.message ?: "Sem app de música") }
+        })
+        info.addView(musicControls)
+        musicAction = pillButton("Abrir AuraMusic", null) { openMusicApp() }.apply { visibility = View.GONE }
+        info.addView(musicAction, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { topMargin = u(0.6f) })
+        box.addView(info, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+        return box
+    }
+
+    private fun mediaButton(icon: Int, primary: Boolean, onClick: () -> Unit) = ImageView(this).apply {
+        setImageResource(icon)
+        val size = u(if (primary) 3.4f else 2.8f)
+        layoutParams = LinearLayout.LayoutParams(size, size).apply { rightMargin = u(0.8f) }
+        setPadding(u(0.6f), u(0.6f), u(0.6f), u(0.6f))
+        isFocusable = true
+        background = StateListDrawable().apply {
+            addState(intArrayOf(android.R.attr.state_focused), rounded(if (primary) CYAN else 0x4422D3EE, size / 2f, CYAN))
+            addState(intArrayOf(), rounded(if (primary) 0xCCF2F2F7.toInt() else Color.TRANSPARENT, size / 2f, if (primary) Color.TRANSPARENT else LINE))
+        }
+        setOnClickListener { onClick() }
     }
 
     private fun updateMusic() {
         if (!MediaListener.enabled(this)) {
-            // Turn music reading on by itself as soon as the phone's ADB connection allows it
+            // Turn the widget on by itself as soon as the phone's ADB connection allows it
             if (!askedMusicPermission && Adb.state == Adb.State.OK) {
                 askedMusicPermission = true
                 loader.execute { runCatching { MediaListener.enable() } }
             }
-            showMusicChip("off", "Música", false)
+            showMusic("music:off", "Controles de música", "Conecte o celular para ativar", null, false, showAction = false)
             return
         }
         val controller = MediaListener.current(this)
         val meta = controller?.metadata
-        if (meta == null) {
-            showMusicChip("none", "Música", false)
+        if (controller == null || meta == null) {
+            showMusic("music:none", "Nada tocando", "Pesquise pelo celular ou abra o AuraMusic", null, false, showAction = true)
             return
         }
         val title = meta.getString(MediaMetadata.METADATA_KEY_TITLE) ?: "Música"
-        val artist = meta.getString(MediaMetadata.METADATA_KEY_ARTIST) ?: ""
+        val artist = meta.getString(MediaMetadata.METADATA_KEY_ARTIST) ?: meta.getString(MediaMetadata.METADATA_KEY_ALBUM) ?: ""
         val playing = controller.playbackState?.state == PlaybackState.STATE_PLAYING
-        showMusicChip("$title|$artist|$playing", if (artist.isNotEmpty()) "$title · $artist" else title, playing)
+        val art = meta.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART) ?: meta.getBitmap(MediaMetadata.METADATA_KEY_ART)
+        showMusic("$title|$artist|$playing|${art?.generationId}", title, artist, art, playing, showAction = false)
     }
 
-    private fun showMusicChip(key: String, label: String, playing: Boolean) {
+    private fun showMusic(key: String, title: String, artist: String, art: android.graphics.Bitmap?, playing: Boolean, showAction: Boolean) {
         if (key == musicKey) return
         musicKey = key
-        musicChip.text = label
-        val icon = getDrawable(if (playing) R.drawable.ic_m_music else R.drawable.ic_m_music)!!.mutate().apply {
-            setColorFilter(if (playing) CYAN else 0xFFA855F7.toInt(), PorterDuff.Mode.SRC_IN)
-            setBounds(0, 0, u(1.4f), u(1.4f))
-        }
-        musicChip.setCompoundDrawables(icon, null, null, null)
+        musicTitle.text = title
+        musicArtist.text = artist
+        if (art != null) musicArt.setImageBitmap(art) else musicArt.setImageResource(R.drawable.ic_m_music)
+        val controls = key.contains('|')
+        musicControls.visibility = if (controls) View.VISIBLE else View.GONE
+        musicAction.visibility = if (showAction) View.VISIBLE else View.GONE
+        musicPlay.setImageResource(if (playing) R.drawable.ic_m_pause else R.drawable.ic_m_play)
     }
 
     private fun openMusicApp() {
@@ -1158,11 +1246,11 @@ class MainActivity : Activity() {
     private fun pillButton(label: String, icon: Int?, onClick: () -> Unit) = Button(this).apply {
         text = label
         isAllCaps = false
-        textSize = px(1.05f)
+        textSize = px(1.1f)
         setTextColor(TEXT)
         minHeight = 0
         minimumHeight = 0
-        setPadding(u(1.2f), u(0.55f), u(1.2f), u(0.55f))
+        setPadding(u(1.3f), u(0.6f), u(1.3f), u(0.6f))
         icon?.let { res ->
             setCompoundDrawables(getDrawable(res)!!.apply { setBounds(0, 0, u(1.4f), u(1.4f)) }, null, null, null)
             compoundDrawablePadding = u(0.6f)
@@ -1199,16 +1287,16 @@ class MainActivity : Activity() {
         clock.text = SimpleDateFormat("HH:mm", Locale.getDefault()).format(now)
         val hour = SimpleDateFormat("H", Locale.getDefault()).format(now).toInt()
         val hello = when { hour < 5 -> "Boa noite"; hour < 12 -> "Bom dia"; hour < 18 -> "Boa tarde"; else -> "Boa noite" }
-        val date = SimpleDateFormat("EEEE, d 'de' MMMM", Locale("pt", "BR")).format(now)
-        greeting.text = "$hello, ${HomePrefs.name(this)}   ·   $date"
+        greeting.text = "$hello, ${HomePrefs.name(this)}"
+        date.text = SimpleDateFormat("EEEE, d 'de' MMMM", Locale("pt", "BR")).format(now).replaceFirstChar { it.uppercase() }
     }
 
     private fun updateStatus() {
         val phoneActive = System.currentTimeMillis() - ControlServer.lastPhoneRequest < 15_000
-        setChip(phoneChip, if (phoneActive) OK else MUTED, if (phoneActive) "Celular" else if (pairing.hasPhones()) "Pareado" else "Sem celular")
+        setChip(phoneChip, if (phoneActive) OK else MUTED, if (phoneActive) "Celular conectado" else if (pairing.hasPhones()) "Celular pareado" else "Nenhum celular")
         val (color, label) = when (Adb.state) {
             Adb.State.OK -> OK to "Controle total"
-            Adb.State.WAITING -> WARN to "Aceite a depuração"
+            Adb.State.WAITING -> WARN to "Aceite \"Permitir depuração\""
             Adb.State.OFF -> MUTED to "Controle básico"
         }
         setChip(adbChip, color, label)
@@ -1265,9 +1353,9 @@ class MainActivity : Activity() {
         includeFontPadding = false
     }
 
-    private fun chip() = text(0.95f, MUTED).apply {
-        background = rounded(0x9912121D.toInt(), u(3f).toFloat(), LINE)
-        setPadding(u(1f), u(0.5f), u(1f), u(0.5f))
+    private fun chip() = text(1.05f, MUTED).apply {
+        background = rounded(0xCC12121D.toInt(), u(3f).toFloat(), LINE)
+        setPadding(u(1.2f), u(0.6f), u(1.2f), u(0.6f))
     }
 
     private fun rounded(fill: Int, radius: Float, stroke: Int) = GradientDrawable().apply {
