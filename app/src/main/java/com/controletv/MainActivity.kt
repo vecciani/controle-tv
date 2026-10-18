@@ -436,6 +436,25 @@ class MainActivity : Activity() {
         private val results = LinearLayout(this@MainActivity).apply { orientation = LinearLayout.VERTICAL }
         private val apps = Apps.list(this@MainActivity).filter { it.pkg !in HomePrefs.hidden(this@MainActivity) }
 
+        /**
+         * Apps that accept a search from outside (Android's standard ACTION_SEARCH), so the query
+         * can be handed to them — film apps first. Netflix also opens its own search link.
+         */
+        private val searchable: List<Pair<String, (String) -> Intent>> = run {
+            val pm = packageManager
+            val visible = apps.map { it.pkg }.toSet()
+            val standard = pm.queryIntentActivities(Intent(Intent.ACTION_SEARCH), 0)
+                .map { it.activityInfo.packageName }
+                .filter { it in visible && it != packageName }
+                .distinct()
+                .map { pkg -> pkg to { q: String -> Intent(Intent.ACTION_SEARCH).setPackage(pkg).putExtra(android.app.SearchManager.QUERY, q) } }
+            val netflix = "com.netflix.ninja".takeIf { pkg ->
+                pkg in visible && Intent(Intent.ACTION_VIEW, Uri.parse("https://www.netflix.com/search?q=x")).setPackage(pkg).resolveActivity(pm) != null
+            }?.let { pkg -> listOf(pkg to { q: String -> Intent(Intent.ACTION_VIEW, Uri.parse("https://www.netflix.com/search?q=" + Uri.encode(q))).setPackage(pkg) }) }.orEmpty()
+            (netflix + standard.filter { it.first != "com.netflix.ninja" || netflix.isEmpty() })
+                .sortedBy { if (Folders.folderOf(this@MainActivity, it.first, Apps.label(this@MainActivity, it.first)) == "filmes") 0 else 1 }
+        }
+
         init {
             requestWindowFeature(Window.FEATURE_NO_TITLE)
             val box = LinearLayout(this@MainActivity).apply {
@@ -467,11 +486,26 @@ class MainActivity : Activity() {
         private fun render(query: String) {
             results.removeAllViews()
             if (query.isEmpty()) {
-                results.addView(text(1.2f, MUTED).apply { text = "Apps, músicas no AuraMusic e vídeos no YouTube" })
+                val where = searchable.joinToString(", ") { Apps.label(this@MainActivity, it.first) }
+                results.addView(text(1.2f, MUTED).apply {
+                    text = "Apps, músicas no AuraMusic, vídeos no YouTube" + if (where.isNotEmpty()) " e dentro de: $where" else ""
+                })
                 return
             }
+            searchable.forEach { (pkg, intentFor) ->
+                option("Buscar \"$query\" no ${Apps.label(this@MainActivity, pkg)}") {
+                    runCatching { startActivity(intentFor(query).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                        .onFailure { toast("Esse app não aceitou a busca") }
+                }
+            }
             if (MusicBridge.musicApp(this@MainActivity) != null) {
-                option("Tocar \"$query\" no AuraMusic") { runCatching { MusicBridge.search(this@MainActivity, query, true) }.onFailure { toast(it.message ?: "Falhou") } }
+                option("Tocar \"$query\" no AuraMusic") {
+                    // Searching goes over the network: off the main thread
+                    Thread {
+                        runCatching { MusicBridge.search(this@MainActivity, query, true) }
+                            .onFailure { e -> runOnUiThread { toast(e.message ?: "Falhou") } }
+                    }.start()
+                }
             }
             option("Buscar \"$query\" no YouTube") {
                 runCatching {

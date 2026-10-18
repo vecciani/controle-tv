@@ -1,6 +1,5 @@
 package com.controletv
 
-import android.app.SearchManager
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
@@ -70,22 +69,35 @@ object MusicBridge {
     }
 
     /**
-     * Plays the best match for [query] right away ("play from search"), or opens the app's
-     * search results so the user can pick. If the TV home was on screen, it comes back after
-     * a few seconds while the music keeps playing.
+     * Plays the best match for [query] right away, or opens the app's search results so the
+     * user can pick. AuraMusic doesn't act on "play from search", but it does play a song link,
+     * so we find the song on YouTube Music first. Returns the songs found (for the phone's list).
+     * Blocking (network): call off the main thread.
      */
-    fun search(context: Context, query: String, play: Boolean) {
+    fun search(context: Context, query: String, play: Boolean): List<YtMusicSearch.Song> {
         val app = musicApp(context) ?: throw IllegalStateException("Instale o AuraMusic na TV")
-        val intent = if (play) {
-            Intent(MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH)
-                .putExtra(SearchManager.QUERY, query)
-                .putExtra(MediaStore.EXTRA_MEDIA_FOCUS, "vnd.android.cursor.item/*")
-        } else {
-            Intent(Intent.ACTION_VIEW, Uri.parse("https://music.youtube.com/search?q=" + Uri.encode(query)))
-        }.setPackage(app).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        if (!play) {
+            open(context, app, Uri.parse("https://music.youtube.com/search?q=" + Uri.encode(query)), returnHome = false)
+            return emptyList()
+        }
+        val songs = YtMusicSearch.songs(query)
+        val first = songs.firstOrNull() ?: throw IllegalStateException("Nada encontrado para \"$query\"")
+        playSong(context, first.videoId)
+        return songs
+    }
+
+    /** Starts a song in AuraMusic (or the music app) by its YouTube Music id. */
+    fun playSong(context: Context, videoId: String) {
+        if (!Regex("[A-Za-z0-9_-]{11}").matches(videoId)) throw IllegalArgumentException("Música inválida")
+        val app = musicApp(context) ?: throw IllegalStateException("Instale o AuraMusic na TV")
+        open(context, app, Uri.parse("https://music.youtube.com/watch?v=$videoId"), returnHome = true)
+    }
+
+    private fun open(context: Context, app: String, uri: Uri, returnHome: Boolean) {
         val wasHome = MainActivity.visible
-        context.startActivity(intent)
-        if (play && wasHome) main.postDelayed({ MainActivity.open(context) }, 4_000)
+        context.startActivity(Intent(Intent.ACTION_VIEW, uri).setPackage(app).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        // If the home was on screen, bring it back while the music keeps playing
+        if (returnHome && wasHome) main.postDelayed({ MainActivity.open(context) }, 4_000)
     }
 
     /** Opens the music app's search screen (from the home widget). */

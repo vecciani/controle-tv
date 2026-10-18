@@ -1491,12 +1491,39 @@ async function musicSearch(play) {
   const query = $('music-query').value.trim();
   if (!query) { $('music-query').focus(); return; }
   buzz(15);
+  toast(play ? 'Procurando…' : 'Abrindo na TV…');
   try {
-    await api('/api/media/search', { query, play });
-    toast(play ? `Tocando "${query}" na TV` : 'Resultados abertos na TV');
+    const { songs = [] } = await api('/api/media/search', { query, play });
+    toast(play ? `Tocando ${songs[0] ? songs[0].title : `"${query}"`} na TV` : 'Resultados abertos na TV');
     $('music-query').blur();
+    renderSongs(songs);
     setTimeout(refreshMusic, 3000);
   } catch (e) { toast(e.message, true); }
+}
+
+// Other matches, in case the first one wasn't the right song
+function renderSongs(songs) {
+  const box = $('music-songs');
+  box.hidden = songs.length < 2;
+  if (box.hidden) return;
+  const title = document.createElement('p');
+  title.textContent = 'Não era essa? Escolha:';
+  box.replaceChildren(title, ...songs.map((song, i) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'song' + (i === 0 ? ' on' : '');
+    btn.innerHTML = '<img alt=""><span><strong></strong><small></small></span>';
+    if (song.thumb) btn.querySelector('img').src = song.thumb;
+    btn.querySelector('strong').textContent = song.title;
+    btn.querySelector('small').textContent = song.subtitle;
+    btn.onclick = async () => {
+      buzz(12);
+      box.querySelectorAll('.song').forEach((b) => b.classList.toggle('on', b === btn));
+      try { await api('/api/media/song', { id: song.id }); toast(`Tocando ${song.title}`); setTimeout(refreshMusic, 3000); }
+      catch (e) { toast(e.message, true); }
+    };
+    return btn;
+  }));
 }
 $('music-search').addEventListener('submit', (e) => { e.preventDefault(); musicSearch(true); });
 $('music-results').addEventListener('click', () => musicSearch(false));

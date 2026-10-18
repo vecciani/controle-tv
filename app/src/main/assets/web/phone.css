@@ -420,3 +420,12 @@ input, textarea, .report { -webkit-user-select: text; user-select: text; -webkit
 .music-search .search { margin: 0; }
 .music-search-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .music-search-actions .pill { padding: 11px 6px; }
+.song-list { display: flex; flex-direction: column; gap: 6px; }
+.song-list p { margin: 0 0 2px; font-size: 12px; color: var(--muted); }
+.song { display: flex; align-items: center; gap: 10px; width: 100%; padding: 6px; border-radius: 12px; text-align: left;
+  background: var(--bg-2); border: 1px solid var(--line); }
+.song.on { border-color: rgba(168, 85, 247, .6); }
+.song img { width: 42px; height: 42px; border-radius: 8px; object-fit: cover; background: var(--surface); }
+.song span { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.song strong { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.song small { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

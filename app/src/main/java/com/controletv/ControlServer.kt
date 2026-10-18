@@ -253,7 +253,14 @@ class ControlServer(
                 val body = body(session)
                 val query = body.optString("query").trim()
                 if (query.isEmpty()) throw IllegalArgumentException("Digite o que quer ouvir")
-                MusicBridge.search(context, query, body.optBoolean("play", true))
+                val songs = MusicBridge.search(context, query, body.optBoolean("play", true))
+                val list = JSONArray()
+                songs.forEach { list.put(JSONObject().put("id", it.videoId).put("title", it.title).put("subtitle", it.subtitle).put("thumb", it.thumbnail)) }
+                ok(JSONObject().put("songs", list))
+            }
+
+            path == "/api/media/song" && post -> {
+                MusicBridge.playSong(context, body(session).getString("id"))
                 ok()
             }
 
