@@ -38,7 +38,12 @@ object Stremio {
         prefs(context).edit().clear().apply()
     }
 
-    /** The user's library, most recently watched first, each with where they stopped. */
+    /**
+     * The user's library and what they're watching, most recently watched first, each with where
+     * they stopped. Like Stremio itself: "inLibrary" items are the ones added to the library;
+     * "watching" ones are in "continue watching", which includes titles never added (Stremio keeps
+     * those as temporary items) and leaves out finished ones (their position goes back to 0).
+     */
     fun library(context: Context): JSONArray {
         val key = prefs(context).getString("authKey", null) ?: throw IllegalStateException("Entre com sua conta do Stremio")
         val reply = post("$API/datastoreGet", JSONObject().put("authKey", key).put("collection", "libraryItem").put("ids", JSONArray()).put("all", true))
@@ -50,8 +55,13 @@ object Stremio {
         val out = mutableListOf<JSONObject>()
         for (i in 0 until items.length()) {
             val item = items.getJSONObject(i)
-            if (item.optBoolean("removed") || item.optBoolean("temp")) continue
+            val removed = item.optBoolean("removed")
+            val temp = item.optBoolean("temp")
+            if (item.optString("type") == "other") continue
             val state = item.optJSONObject("state") ?: JSONObject()
+            val inLibrary = !removed && !temp
+            val watching = (!removed || temp) && state.optLong("timeOffset") > 0
+            if (!inLibrary && !watching) continue
             out += JSONObject()
                 .put("id", item.optString("_id"))
                 .put("type", item.optString("type"))
@@ -61,6 +71,8 @@ object Stremio {
                 .put("duration", state.optLong("duration"))
                 .put("videoId", state.optString("video_id").ifEmpty { null })
                 .put("lastWatched", state.optString("lastWatched"))
+                .put("inLibrary", inLibrary)
+                .put("watching", watching)
         }
         return JSONArray(out.sortedByDescending { it.optString("lastWatched") })
     }

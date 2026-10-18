@@ -1565,9 +1565,11 @@ async function loadMovies() {
   if (stremio.loggedIn) {
     try {
       const { items } = await api('/api/stremio/library');
-      const watching = items.filter((i) => i.position > 0 && i.duration > 0 && i.position / i.duration < 0.95);
-      if (watching.length) body.append(shelf('Continuar assistindo', watching.map((i) => posterCard(i, { progress: i.position / i.duration }))));
-      if (items.length) body.append(shelf('Minha biblioteca', items.map((i) => posterCard(i))));
+      // Same as Stremio: "continue watching" includes titles never added to the library
+      const watching = items.filter((i) => i.watching);
+      const library = items.filter((i) => i.inLibrary);
+      if (watching.length) body.append(shelf('Continuar assistindo', watching.map((i) => posterCard(i, i.duration > 0 ? { progress: i.position / i.duration } : {}))));
+      if (library.length) body.append(shelf('Minha biblioteca', library.map((i) => posterCard(i))));
     } catch (e) { toast(e.message, true); }
   }
   const [movies, series] = await Promise.all([

@@ -90,6 +90,7 @@ class MainActivity : Activity() {
     private lateinit var welcomeBack: ImageView
     private var welcomeUrl: String? = null
     private var headerShown = true
+    private lateinit var backLayer: FrameLayout
     private var headerAnim: ValueAnimator? = null
     private lateinit var phoneChip: ImageView
     private lateinit var adbChip: ImageView
@@ -235,6 +236,25 @@ class MainActivity : Activity() {
         // the focused title's hero; the rows
         val column = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
 
+        // ---- Full-screen picture of the focused title, behind everything while browsing:
+        // darker on the left for the details, at the bottom for the rows and at the top for the tabs
+        backLayer = FrameLayout(this).apply { alpha = 0f }
+        backBack = backdropView()
+        backFront = backdropView()
+        backLayer.addView(backBack, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+        backLayer.addView(backFront, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+        backLayer.addView(View(this).apply { setBackgroundColor(0x2607070C) }, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+        backLayer.addView(View(this).apply {
+            background = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT, intArrayOf(0xF207070C.toInt(), 0xCC07070C.toInt(), 0x4D07070C, 0x0007070C))
+        }, FrameLayout.LayoutParams((screenW * 0.65f).toInt(), MATCH_PARENT, Gravity.START))
+        backLayer.addView(View(this).apply {
+            background = GradientDrawable(GradientDrawable.Orientation.BOTTOM_TOP, intArrayOf(0xF207070C.toInt(), 0xB307070C.toInt(), 0x0007070C))
+        }, FrameLayout.LayoutParams(MATCH_PARENT, (screenH * 0.5f).toInt(), Gravity.BOTTOM))
+        backLayer.addView(View(this).apply {
+            background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(0xCC07070C.toInt(), 0x0007070C))
+        }, FrameLayout.LayoutParams(MATCH_PARENT, (screenH * 0.14f).toInt(), Gravity.TOP))
+        root.addView(backLayer, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+
         // ---- Welcome: a dim picture of something to watch behind the search bar, status and
         // clock; then the big greeting, the date and the music player
         header = FrameLayout(this)
@@ -329,26 +349,9 @@ class MainActivity : Activity() {
         styleTabs()
         column.addView(tabRow, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
 
-        // ---- Hero: the focused title's picture across the whole band (never under the rows),
-        // darkened on the left for the details and faded at the bottom; it grows when the top folds away
+        // ---- Hero: the focused title's details; its picture fills the whole screen behind
+        // the tabs, the hero and the rows (see backLayer)
         val heroBox = FrameLayout(this)
-        val backW = screenW
-        val backdrop = FrameLayout(this)
-        backBack = backdropView()
-        backFront = backdropView()
-        backdrop.addView(backBack, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
-        backdrop.addView(backFront, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
-        heroBox.addView(backdrop, FrameLayout.LayoutParams(backW, MATCH_PARENT, Gravity.END))
-        heroBox.addView(View(this).apply { setBackgroundColor(0x3307070C) }, FrameLayout.LayoutParams(backW, MATCH_PARENT, Gravity.END))
-        heroBox.addView(View(this).apply {
-            background = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT, intArrayOf(0xFF07070C.toInt(), 0xD907070C.toInt(), 0x5907070C, 0x0007070C))
-        }, FrameLayout.LayoutParams((screenW * 0.62f).toInt(), MATCH_PARENT, Gravity.START))
-        heroBox.addView(View(this).apply {
-            background = GradientDrawable(GradientDrawable.Orientation.BOTTOM_TOP, intArrayOf(0xFF07070C.toInt(), 0x8007070C.toInt(), 0x0007070C))
-        }, FrameLayout.LayoutParams(MATCH_PARENT, (screenH * 0.2f).toInt(), Gravity.BOTTOM))
-        heroBox.addView(View(this).apply {
-            background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(0xB307070C.toInt(), 0x0007070C))
-        }, FrameLayout.LayoutParams(MATCH_PARENT, (screenH * 0.08f).toInt(), Gravity.TOP))
 
         // Details: logo (or title), IMDb · year · length · genres, awards, synopsis, cast, hint
         val hero = LinearLayout(this).apply {
@@ -387,17 +390,14 @@ class MainActivity : Activity() {
             visibility = View.GONE
         }
         hero.addView(heroAwards, LinearLayout.LayoutParams(u(48f), WRAP_CONTENT).apply { topMargin = u(0.7f) })
-        heroDesc = text(1.3f, 0xCCF2F2F7.toInt()).apply {
-            maxLines = 3
-            ellipsize = TextUtils.TruncateAt.END
-            setLineSpacing(0f, 1.15f)
-        }
-        hero.addView(heroDesc, LinearLayout.LayoutParams(u(44f), WRAP_CONTENT).apply { topMargin = u(0.8f) })
+        // The synopsis is always shown whole (long ones get a slightly smaller font, see applyHero)
+        heroDesc = text(1.3f, 0xDDF2F2F7.toInt()).apply { setLineSpacing(0f, 1.12f) }
+        hero.addView(heroDesc, LinearLayout.LayoutParams(u(54f), WRAP_CONTENT).apply { topMargin = u(0.8f) })
         heroCredits = text(1.0f, MUTED).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
         hero.addView(heroCredits, LinearLayout.LayoutParams(u(44f), WRAP_CONTENT).apply { topMargin = u(0.7f) })
         heroHint = text(1.05f, CYAN).apply { visibility = View.GONE }
         hero.addView(heroHint, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { topMargin = u(0.9f) })
-        heroBox.addView(hero, FrameLayout.LayoutParams(u(56f), MATCH_PARENT, Gravity.START))
+        heroBox.addView(hero, FrameLayout.LayoutParams(u(60f), MATCH_PARENT, Gravity.START))
         column.addView(heroBox, LinearLayout.LayoutParams(MATCH_PARENT, 0, 1f))
 
         // ---- Rows: the focused one slides up to the top of its band (see bringRowToTop)
@@ -554,6 +554,8 @@ class MainActivity : Activity() {
             start()
         }
         header.animate().alpha(if (show) 1f else 0f).setDuration(260).start()
+        // The title's full-screen picture only shows while browsing (the welcome screen has its own)
+        backLayer.animate().alpha(if (show) 0f else 1f).setDuration(320).start()
     }
 
     /** All the screen above the tabs. */
@@ -691,7 +693,13 @@ class MainActivity : Activity() {
         val awards = Awards.toPortuguese(item.optString("awards"))
         heroAwards.text = awards ?: ""
         heroAwards.visibility = if (awards != null) View.VISIBLE else View.GONE
-        heroDesc.text = item.optString("description")
+        val synopsis = item.optString("description")
+        heroDesc.textSize = px(when {
+            synopsis.length <= 320 -> 1.3f
+            synopsis.length <= 480 -> 1.15f
+            else -> 1.0f
+        })
+        heroDesc.text = synopsis
         fun names(key: String, max: Int) = item.optJSONArray(key)?.let { a -> List(minOf(max, a.length())) { a.optString(it) } }?.filter { it.isNotBlank() }.orEmpty()
         val cast = names("cast", 3)
         val director = names("director", 1)
@@ -983,11 +991,8 @@ class MainActivity : Activity() {
             }
             runOnUiThread {
                 stremioLoggedIn = loggedIn
-                stremioLibrary = items
-                stremioWatching = items.filter {
-                    val d = it.optLong("duration"); val p = it.optLong("position")
-                    d > 0 && p > 0 && p.toFloat() / d < 0.95f
-                }
+                stremioLibrary = items.filter { it.optBoolean("inLibrary") }
+                stremioWatching = items.filter { it.optBoolean("watching") }
                 newMovies = movies
                 newSeries = series
                 genreRows = genres
