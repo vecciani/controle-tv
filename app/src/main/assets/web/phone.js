@@ -1025,7 +1025,9 @@ async function filesSheet(path) {
   renderTransfer();
 
   try {
-    const data = JSON.parse(await nativeCall('list', { path }));
+    // The phone app answers with the object itself (older versions sent it as text)
+    const raw = await nativeCall('list', { path });
+    const data = typeof raw === 'string' ? JSON.parse(raw) : raw;
     if (filesPath !== path || $('sheet').hidden) return;
     const { total, free } = data.space || {};
     if (total) {

@@ -32,19 +32,36 @@ class TvFiles(private val context: Context, private val relay: () -> Relay?) {
     /** Folder contents (folders first) plus free space, as JSON. */
     fun list(path: String): JSONObject {
         val dir = checked(path)
-        // One line per entry: type|size|mtime|name (hidden files left out)
-        val out = shell("cd ${q(dir)} 2>/dev/null && stat -c '%F|%s|%Y|%n' * 2>/dev/null")
-        val entries = out.lines().mapNotNull { line ->
-            val parts = line.split('|', limit = 4)
-            if (parts.size < 4 || parts[3].isEmpty() || parts[3] == "*") return@mapNotNull null
-            JSONObject()
-                .put("name", parts[3])
-                .put("dir", parts[0].contains("directory"))
-                .put("size", parts[1].toLongOrNull() ?: 0)
-                .put("mtime", (parts[2].toLongOrNull() ?: 0) * 1000)
-        }.sortedWith(compareBy({ !it.getBoolean("dir") }, { it.getString("name").lowercase() }))
+        val entries = (listWithStat(dir).ifEmpty { listWithLs(dir) })
+            .sortedWith(compareBy({ !it.getBoolean("dir") }, { it.getString("name").lowercase() }))
         return JSONObject().put("path", dir).put("entries", JSONArray(entries)).put("space", space())
     }
+
+    /** One line per entry: type|size|mtime|name (hidden files left out). */
+    private fun listWithStat(dir: String): List<JSONObject> {
+        val out = shell("cd ${q(dir)} 2>/dev/null && stat -c '%F|%s|%Y|%n' * 2>/dev/null")
+        return out.lines().mapNotNull { line ->
+            val parts = line.split('|', limit = 4)
+            if (parts.size < 4 || parts[3].isEmpty() || parts[3] == "*") return@mapNotNull null
+            entry(parts[3], parts[0].contains("directory"), parts[1].toLongOrNull() ?: 0, (parts[2].toLongOrNull() ?: 0) * 1000)
+        }
+    }
+
+    /** Fallback for systems whose stat lacks -c: parses "ls -l" (e.g. "drwxrwx--x 2 root sdcard_rw 4096 2026-10-17 12:00 Download"). */
+    private fun listWithLs(dir: String): List<JSONObject> {
+        val line = Regex("""^([dl-])\S*\s+\d+\s+\S+\s+\S+\s+(\d+)\s+(\d{4}-\d{2}-\d{2} \d{2}:\d{2})\s+(.+)$""")
+        val format = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.US)
+        return shell("ls -l ${q(dir)}/ 2>/dev/null").lines().mapNotNull { raw ->
+            val m = line.find(raw.trim()) ?: return@mapNotNull null
+            val (type, size, date, name) = m.destructured
+            val cleanName = if (type == "l") name.substringBefore(" -> ") else name
+            if (cleanName.startsWith(".")) return@mapNotNull null
+            entry(cleanName, type != "-", size.toLongOrNull() ?: 0, runCatching { format.parse(date)!!.time }.getOrDefault(0))
+        }
+    }
+
+    private fun entry(name: String, dir: Boolean, size: Long, mtime: Long) =
+        JSONObject().put("name", name).put("dir", dir).put("size", if (dir) 0 else size).put("mtime", mtime)
 
     private fun space(): JSONObject {
         // df -k: Filesystem 1K-blocks Used Available Use% Mounted-on
