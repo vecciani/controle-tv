@@ -48,7 +48,7 @@ object TvUpdater {
         return conn.inputStream.use { it.readBytes().decodeToString() }
     }
 
-    private fun download(url: String): ByteArray {
+    fun download(url: String): ByteArray {
         var current = URL(url)
         repeat(5) {
             val conn = current.openConnection() as HttpURLConnection

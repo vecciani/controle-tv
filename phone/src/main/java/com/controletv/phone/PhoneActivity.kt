@@ -55,6 +55,7 @@ class PhoneActivity : Activity() {
     private var relay: Relay? = null
     private var fileCallback: ValueCallback<Array<Uri>>? = null
     private val tvFiles by lazy { TvFiles(this) { relay } }
+    private val deviceSetup by lazy { DeviceSetup(this) }
     private var airMouse: AirMouse? = null
     private var udp: UdpLink? = null
     private var lastUpdateCheck = 0L
@@ -295,6 +296,10 @@ class PhoneActivity : Activity() {
                         "open" -> tvFiles.open(args.getString("path"), args.getString("mime"))
                         "allowRead" -> tvFiles.allowPlayerToRead()
                         "download" -> tvFiles.download(args.getString("path"), args.optLong("size")) { done, total -> progress(id, done, total) }
+                        // Putting Controle TV on another device (a projector, a TV box)
+                        "scanDevices" -> deviceSetup.scan()
+                        "describeDevice" -> deviceSetup.describe(args.getString("ip"))
+                        "installTvApp" -> deviceSetup.installTvApp(args.getString("ip")) { step -> jsToast(step) }
                         else -> throw IllegalArgumentException("Função desconhecida: $method")
                     }
                     answer(id, true, if (result is JSONObject) result.toString() else JSONObject.quote(result.toString()))

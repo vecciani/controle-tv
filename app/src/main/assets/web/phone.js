@@ -649,6 +649,67 @@ async function cecSheet() {
   } catch (e) { out.textContent = e.message; }
 }
 
+// Puts Controle TV on another device on the network (a projector, a TV box) through ADB:
+// the device needs "USB debugging" on, and asks "Allow debugging?" the first time.
+async function deviceSheet() {
+  const sheet = openSheet(`
+    <div class="sheet-head"><div><h3>Instalar em outro aparelho</h3><p>No aparelho: ative as Opções do desenvolvedor e a Depuração USB, e conecte no mesmo Wi-Fi do celular</p></div></div>
+    <div id="dev-list"><p class="hint">Procurando aparelhos na rede…</p></div>
+    <div class="sheet-actions">
+      <button class="sheet-btn" id="dev-rescan">${icon('refresh')}Procurar de novo</button>
+      <button class="sheet-btn" id="dev-close">${icon('x')}Fechar</button>
+    </div>`);
+  sheetButton(sheet, 'dev-close', settingsSheet);
+  const list = sheet.querySelector('#dev-list');
+  const scan = async () => {
+    list.replaceChildren(hintText('Procurando aparelhos na rede…'));
+    let ips;
+    try {
+      const raw = await nativeCall('scanDevices');
+      ips = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    } catch (e) { list.replaceChildren(hintText(e.message)); return; }
+    if (!ips.length) {
+      list.replaceChildren(hintText('Nenhum aparelho com depuração ligada. Confira a Depuração USB e se ele está no mesmo Wi-Fi.'));
+      return;
+    }
+    list.replaceChildren(...ips.map((ip) => deviceRow(ip)));
+  };
+  const deviceRow = (ip) => {
+    const row = document.createElement('div');
+    row.className = 'channel-row';
+    row.innerHTML = `${icon('tv')}<div><strong></strong><small>Toque em "Ver" e aceite a depuração no aparelho</small></div><button class="pill">Ver</button>`;
+    row.querySelector('strong').textContent = ip;
+    const small = row.querySelector('small');
+    const btn = row.querySelector('button');
+    btn.onclick = async () => {
+      btn.disabled = true;
+      small.textContent = 'Olhe o aparelho: aceite "Permitir depuração"…';
+      try {
+        const raw = await nativeCall('describeDevice', { ip });
+        const d = typeof raw === 'string' ? JSON.parse(raw) : raw;
+        row.querySelector('strong').textContent = [d.maker, d.model].filter(Boolean).join(' ') || ip;
+        small.textContent = `Android ${d.android || '?'} · ${ip}${d.installed ? ' · Controle TV já instalado' : ''}`;
+        btn.textContent = d.installed ? 'Atualizar' : 'Instalar';
+        btn.disabled = false;
+        btn.onclick = async () => {
+          btn.disabled = true;
+          try {
+            const msg = await nativeCall('installTvApp', { ip });
+            toast(typeof msg === 'string' ? msg.replace(/^"|"$/g, '') : 'Instalado');
+            small.textContent = `Instalado. Para controlar ele: Ajustes → Trocar de TV · ${ip}`;
+          } catch (e) { toast(e.message, true); btn.disabled = false; }
+        };
+      } catch (e) {
+        small.textContent = e.message || 'Não respondeu: aceite a depuração no aparelho e tente de novo';
+        btn.disabled = false;
+      }
+    };
+    return row;
+  };
+  sheetButton(sheet, 'dev-rescan', scan);
+  scan();
+}
+
 function sheetButton(sheet, id, handler) {
   sheet.querySelector(`#${id}`)?.addEventListener('click', handler);
 }
@@ -810,6 +871,7 @@ function settingsSheet() {
       <button class="sheet-btn" id="s-saver">${icon('image')}Tela de descanso</button>
       <button class="sheet-btn" id="s-system">${icon('search')}Diagnóstico das configurações da TV</button>
       <button class="sheet-btn" id="s-cec">${icon('power')}Teste do HDMI-CEC (ligar o Xbox)</button>
+      ${native ? `<button class="sheet-btn" id="s-device">${icon('download')}Instalar em outro aparelho (projetor, TV box)</button>` : ''}
       <button class="sheet-btn" id="s-player">${icon('play')}Player da TV</button>
       <button class="sheet-btn" id="s-pin">${icon('lock')}${s.requirePin ? 'Parar de pedir PIN' : 'Pedir PIN para novos celulares'}</button>
       ${native?.updateTv ? `<button class="sheet-btn primary" id="s-update-tv">${icon('download')}Atualizar a TV pelo celular</button>` : ''}
@@ -854,6 +916,7 @@ function settingsSheet() {
     } catch (e) { report.querySelector('#s-system-report').textContent = e.message; }
   });
   sheetButton(sheet, 's-cec', cecSheet);
+  sheetButton(sheet, 's-device', deviceSheet);
   const nameValue = sheet.querySelector('#s-name-value');
   if (nameValue) nameValue.textContent = s.homeName || '–';
   sheetButton(sheet, 's-name', () => {
