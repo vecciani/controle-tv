@@ -36,7 +36,7 @@ class ControlServer(
         if (!path.startsWith("/api/")) return page(path)
 
         // Lets the phone app find the TV on the network
-        if (path == "/api/hello") return ok(JSONObject().put("app", "controle-tv").put("name", android.os.Build.MODEL))
+        if (path == "/api/hello") return ok(JSONObject().put("app", "controle-tv").put("name", deviceName(context)))
 
         if (path == "/api/pair" && session.method == Method.POST) {
             val token = pairing.pair(body(session).optString("pin"))
@@ -422,6 +422,7 @@ class ControlServer(
             .put("subtitleLanguage", PlayerActivity.subtitleLanguage(context))
             .put("autoCc", AutoCaptions.json())
             .put("device", "${android.os.Build.MODEL} · Android ${android.os.Build.VERSION.RELEASE} (API ${android.os.Build.VERSION.SDK_INT})")
+            .put("name", deviceName(context))
         foreground()?.let { pkg ->
             json.put("foreground", JSONObject().put("pkg", pkg).put("label", Apps.label(context, pkg)))
         }

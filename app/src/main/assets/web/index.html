@@ -17,7 +17,7 @@
 <section id="pair" class="pair" hidden>
   <div class="pair-logo"><i data-icon="tv"></i></div>
   <h1>Conectar à <span class="neon-text">TV</span></h1>
-  <p>Digite o PIN que aparece na tela do Fire TV.</p>
+  <p>Digite o PIN que aparece na tela da TV.</p>
   <form id="pair-form">
     <input id="pin" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="off" placeholder="····">
     <button type="submit" class="btn-primary">Conectar</button>
@@ -28,7 +28,11 @@
 <!-- App -->
 <div id="app" hidden>
   <header class="topbar">
-    <div class="brand"><i data-icon="tv"></i><span>CONTROLE<b>TV</b></span></div>
+    <button class="brand" id="device-switch" aria-label="Trocar de aparelho">
+      <i data-icon="tv"></i>
+      <span class="brand-text"><span class="brand-label">CONTROLE<b>TV</b></span><small id="device-name"></small></span>
+      <i data-icon="down" class="brand-chevron"></i>
+    </button>
     <button class="status" id="status-pill"><span class="dot" id="status-dot"></span><span id="status-text">Conectando</span></button>
     <button class="icon-btn" id="open-settings" aria-label="Ajustes"><i data-icon="settings"></i></button>
   </header>

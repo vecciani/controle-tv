@@ -40,6 +40,20 @@
             </intent-filter>
         </activity>
 
+        <!-- Home screen the official way, on devices that allow it (projectors, TV boxes).
+             Off by default and turned on by HomeWatcher.setRedirectHome: Fire OS ignores it. -->
+        <activity-alias
+            android:name=".HomeScreen"
+            android:enabled="false"
+            android:exported="true"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.HOME" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity-alias>
+
         <activity
             android:name=".ScreenSaverActivity"
             android:excludeFromRecents="true"

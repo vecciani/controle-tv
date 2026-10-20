@@ -1345,8 +1345,8 @@ class MainActivity : Activity() {
         tiles += card("set:hidden", "Apps escondidos", "Apps tirados da tela inicial", false, { it.setImageResource(R.drawable.ic_t_apps) }, iconTile = true) {
             hiddenApps()
         }
-        tiles += card("set:amazon", "Tela da Amazon", "Tela inicial original do Fire TV", false, { it.setImageResource(R.drawable.ic_t_amazon) }, iconTile = true) {
-            HomeWatcher.openAmazonHome(this)
+        tiles += card("set:amazon", "Tela original", "Tela inicial de fábrica deste aparelho", false, { it.setImageResource(R.drawable.ic_t_amazon) }, iconTile = true) {
+            HomeWatcher.openOriginalHome(this)
         }
         return tiles
     }

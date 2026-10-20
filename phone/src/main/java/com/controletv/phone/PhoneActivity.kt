@@ -126,7 +126,13 @@ class PhoneActivity : Activity() {
 
         // Check the TV answers before loading: an IP that changed would otherwise hang on a black screen
         Thread {
-            val alive = hello(host) != null
+            val name = hello(host)
+            val alive = name != null
+            // Devices paired before the list existed join it on their next connection
+            if (name != null) {
+                val saved = savedDevices()
+                if (saved.optString(host) != name) prefs.edit().putString("devices", saved.put(host, name).toString()).apply()
+            }
             main.post {
                 if (isFinishing) return@post
                 if (!alive) showDiscovery("A TV não respondeu em $host. Procurando de novo…", failedHost = host)
@@ -382,6 +388,28 @@ class PhoneActivity : Activity() {
                 showDiscovery(null)
             }
         }
+
+        /** Every device used before (Fire TV, projector…), the current one marked. */
+        @JavascriptInterface
+        fun devices(): String {
+            val current = prefs.getString("host", null)
+            val saved = savedDevices()
+            return JSONArray(saved.keys().asSequence().map { ip ->
+                JSONObject().put("ip", ip).put("name", saved.optString(ip)).put("current", ip == current)
+            }.toList()).toString()
+        }
+
+        @JavascriptInterface
+        fun switchDevice(ip: String) {
+            main.post { choose(ip) }
+        }
+
+        @JavascriptInterface
+        fun removeDevice(ip: String) {
+            val saved = savedDevices()
+            saved.remove(ip)
+            prefs.edit().putString("devices", saved.toString()).apply()
+        }
     }
 
     @Deprecated("Deprecated in Java")
@@ -556,6 +584,7 @@ class PhoneActivity : Activity() {
             setPadding(dp(24), dp(72), dp(24), dp(24))
             addView(text("CONTROLE TV", 13f, CYAN, bold = true).apply { letterSpacing = 0.25f })
             addView(text("Encontrar a TV", 30f, TEXT, bold = true).apply { setPadding(0, dp(8), 0, dp(4)) })
+            addView(text("Fire TV, projetor ou TV box com o Controle TV aberto", 14f, MUTED))
             addView(status)
             addView(found, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(20) })
             addView(manual, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(24) })
@@ -575,20 +604,28 @@ class PhoneActivity : Activity() {
                     status.text = message ?: "Toque na sua TV:"
                     tvs.forEach { (ip, name) ->
                         found.addView(
-                            button("$name  ·  $ip", SURFACE, TEXT) { choose(ip) },
+                            button("$name  ·  $ip", SURFACE, TEXT) { choose(ip, name) },
                             LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { bottomMargin = dp(10) }
                         )
                     }
-                    if (tvs.size == 1 && tvs[0].first != failedHost) choose(tvs[0].first)
+                    if (tvs.size == 1 && tvs[0].first != failedHost) choose(tvs[0].first, tvs[0].second)
                 }
             }
         }.start()
     }
 
-    private fun choose(ip: String) {
-        prefs.edit().putString("host", ip).apply()
+    private fun choose(ip: String, name: String? = null) {
+        val saved = savedDevices()
+        val label = name ?: saved.optString(ip).ifEmpty { "TV" }
+        // Hotspot addresses change: the same device found at a new address replaces the old entry
+        saved.keys().asSequence().toList().filter { it != ip && saved.optString(it) == label }.forEach { saved.remove(it) }
+        saved.put(ip, label)
+        prefs.edit().putString("host", ip).putString("devices", saved.toString()).apply()
         showController(ip)
     }
+
+    /** ip → name of the devices used before. */
+    private fun savedDevices(): JSONObject = runCatching { JSONObject(prefs.getString("devices", "{}")!!) }.getOrDefault(JSONObject())
 
     /** Looks for our TV server (port 8765) on every /24 network the phone is on. */
     private fun scan(): List<Pair<String, String>> {

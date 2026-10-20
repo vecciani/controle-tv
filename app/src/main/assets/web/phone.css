@@ -30,8 +30,13 @@ body {
   position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 10px;
   padding: 14px 16px; background: linear-gradient(var(--bg) 60%, transparent);
 }
-.brand { display: flex; align-items: center; gap: 8px; color: var(--cyan); flex: 1; }
-.brand span { font-size: 13px; font-weight: 700; letter-spacing: .22em; color: var(--text); }
+.brand { display: flex; align-items: center; gap: 8px; color: var(--cyan); flex: 1; min-width: 0; text-align: left; }
+.brand-text { display: flex; flex-direction: column; min-width: 0; }
+.brand-label { font-size: 13px; font-weight: 700; letter-spacing: .22em; color: var(--text); }
+.brand small { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.brand small:empty { display: none; }
+.brand .brand-chevron { width: 16px; height: 16px; color: var(--muted); flex: none; }
+.device-row.on { border-color: rgba(34, 211, 238, .5); background: rgba(34, 211, 238, .08); }
 .brand b { color: var(--cyan); font-weight: 800; }
 .status {
   display: flex; align-items: center; gap: 7px; padding: 7px 12px; border-radius: 999px;
