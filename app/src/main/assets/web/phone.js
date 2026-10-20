@@ -250,6 +250,9 @@ function setPadMode(mode) {
   $('air-panel').hidden = mode !== 'air';
   if (PAD_HINTS[mode]) $('pad-hint').textContent = PAD_HINTS[mode];
   $('dpad').hidden = mode !== 'dpad';
+  // The air panel has its own big Voltar: the small one gives its place to the keyboard
+  $('row-back').hidden = mode === 'air';
+  $('row-keys').hidden = mode !== 'air';
 }
 
 // ---------- Air mouse: "Mover" switch, scroll pad, select / back ----------
@@ -341,13 +344,14 @@ function showTab(tab) {
   if (state.tab === 'keyboard' && tab !== 'keyboard') setKeyboard(false);
   if (tab !== 'remote') setAirMode('off');
   state.tab = tab;
-  for (const name of ['home', 'remote', 'apps', 'movies', 'keyboard']) {
+  for (const name of ['home', 'remote', 'apps', 'movies', 'youtube', 'keyboard']) {
     $(`view-${name}`).hidden = name !== tab;
   }
   document.querySelectorAll('.tabbar button').forEach((b) => b.classList.toggle('on', b.dataset.tab === tab));
   window.scrollTo(0, 0);
   if (tab === 'apps') loadApps();
   if (tab === 'movies') loadMovies();
+  if (tab === 'youtube') loadYouTube();
   if (tab === 'keyboard') {
     setKeyboard(true);
     setTimeout(() => $('kb-input').focus(), 50);
@@ -1648,6 +1652,186 @@ $('movies-search').addEventListener('input', () => {
   clearTimeout(moviesQueryTimer);
   moviesQueryTimer = setTimeout(loadMovies, 450);
 });
+
+// ---------- YouTube: the channels picked here become rows on the TV; videos open in SmartTube ----------
+
+const ytVideos = new Map(); // channel id → { at, videos }
+
+async function loadYouTube() {
+  const body = $('yt-body');
+  const query = $('yt-search').value.trim();
+  if (query) return searchYouTube(query);
+  let yt;
+  try { yt = await api('/api/youtube'); } catch (e) { body.replaceChildren(hintText(e.message)); return; }
+  body.replaceChildren();
+  if (!yt.smartTube) {
+    body.append(noteCard('tv', 'Instale o SmartTube na TV', 'É ele que toca o YouTube sem anúncios. Sem ele, os vídeos abrem no app comum.'));
+  }
+  if (!yt.channels.length) {
+    const card = noteCard('youtube', 'Escolha seus canais', 'Cada canal vira uma fileira com os vídeos mais novos, aqui e na tela inicial da TV.');
+    const add = document.createElement('button');
+    add.className = 'pill glow';
+    add.innerHTML = `${icon('plus')}Adicionar canal`;
+    add.onclick = channelsSheet;
+    card.querySelector('div').append(add);
+    body.append(card);
+    return;
+  }
+  for (const channel of yt.channels) {
+    const section = shelf(channel.name, []);
+    body.append(section);
+    channelVideos(channel.id)
+      .then((videos) => section.querySelector('.shelf-row').replaceChildren(...videos.slice(0, 15).map((v) => videoCard(v))))
+      .catch(() => section.querySelector('.shelf-row').replaceChildren(hintText('Não deu para carregar este canal agora')));
+  }
+}
+
+async function channelVideos(id) {
+  const cached = ytVideos.get(id);
+  if (cached && Date.now() - cached.at < 10 * 60_000) return cached.videos;
+  const { videos } = await api(`/api/youtube/videos?channel=${encodeURIComponent(id)}`);
+  ytVideos.set(id, { at: Date.now(), videos });
+  return videos;
+}
+
+async function searchYouTube(query) {
+  const body = $('yt-body');
+  body.replaceChildren(hintText('Buscando…'));
+  try {
+    const { videos } = await api(`/api/youtube/search?q=${encodeURIComponent(query)}`);
+    const grid = document.createElement('div');
+    grid.className = 'video-grid';
+    grid.append(...videos.map((v) => videoCard(v)));
+    body.replaceChildren(videos.length ? grid : hintText('Nada encontrado'));
+  } catch (e) { body.replaceChildren(hintText(e.message)); }
+}
+
+function videoCard(v) {
+  const btn = document.createElement('button');
+  btn.className = 'video';
+  btn.innerHTML = '<span class="art"><img alt="" loading="lazy"></span><strong></strong><small></small>';
+  btn.querySelector('img').src = v.thumbSmall;
+  if (v.length) btn.querySelector('.art').insertAdjacentHTML('beforeend', `<span class="len"></span>`);
+  if (v.length) btn.querySelector('.len').textContent = v.length;
+  btn.querySelector('strong').textContent = v.name;
+  btn.querySelector('small').textContent = [v.channel, v.when].filter(Boolean).join(' · ');
+  btn.onclick = () => videoSheet(v);
+  return btn;
+}
+
+function videoSheet(v) {
+  const sheet = openSheet(`
+    <div class="video-sheet">
+      <img class="thumb" alt="">
+      <h3></h3>
+      <p class="meta"></p>
+      <p class="about"></p>
+      <div class="sheet-actions">
+        <button class="sheet-btn primary" id="v-play">${icon('play')}Tocar na TV</button>
+        <button class="sheet-btn" id="v-follow" hidden>${icon('plus')}<span></span></button>
+      </div>
+    </div>`);
+  sheet.querySelector('.thumb').src = v.thumb;
+  sheet.querySelector('.thumb').onerror = (e) => { e.target.onerror = null; e.target.src = v.thumbSmall; };
+  sheet.querySelector('h3').textContent = v.name;
+  sheet.querySelector('.meta').textContent = [v.channel, v.when, v.views, v.length].filter(Boolean).join(' · ');
+  sheet.querySelector('.about').textContent = (v.description || '').split(/\n\s*\n/)[0].slice(0, 500);
+  sheetButton(sheet, 'v-play', async () => {
+    try {
+      await api('/api/youtube/open', { id: v.id });
+      toast('Abrindo na TV');
+      closeSheet();
+    } catch (e) { toast(e.message, true); }
+  });
+  // From a search: offer to follow the channel
+  api('/api/youtube').then(({ channels }) => {
+    if (!v.channelId || channels.some((c) => c.id === v.channelId)) return;
+    const follow = sheet.querySelector('#v-follow');
+    follow.querySelector('span').textContent = `Adicionar ${v.channel}`;
+    follow.hidden = false;
+    follow.onclick = async () => {
+      try {
+        await api('/api/youtube/channel', { id: v.channelId, name: v.channel });
+        toast(`${v.channel} adicionado`);
+        follow.hidden = true;
+      } catch (e) { toast(e.message, true); }
+    };
+  }).catch(() => {});
+}
+
+/** The picked channels (remove) and a search to add more. */
+async function channelsSheet() {
+  const sheet = openSheet(`
+    <div class="sheet-head"><div><h3>Seus canais</h3><p>Cada um vira uma fileira aqui e na TV</p></div></div>
+    <div id="ch-list"></div>
+    <h4>Adicionar canal</h4>
+    <label class="search">${icon('search')}<input id="ch-query" type="search" placeholder="Nome do canal" autocomplete="off" enterkeyhint="search"></label>
+    <div id="ch-results"></div>
+    <div class="sheet-actions"><button class="sheet-btn" id="ch-done">${icon('check')}Pronto</button></div>`);
+  const list = sheet.querySelector('#ch-list');
+  const results = sheet.querySelector('#ch-results');
+  const row = (c, action, actionIcon, label) => {
+    const el = document.createElement('div');
+    el.className = 'channel-row';
+    el.innerHTML = `<img alt=""><div><strong></strong><small></small></div><button class="round" aria-label="${label}">${icon(actionIcon)}</button>`;
+    if (c.thumb) el.querySelector('img').src = c.thumb;
+    el.querySelector('strong').textContent = c.name;
+    el.querySelector('small').textContent = c.subscribers || '';
+    el.querySelector('button').onclick = () => action(c);
+    return el;
+  };
+  let saved = [];
+  const showSaved = () => {
+    list.replaceChildren(...(saved.length ? saved.map((c) => row(c, remove, 'trash', 'Remover')) : [hintText('Nenhum canal ainda')]));
+  };
+  const remove = async (c) => {
+    try { saved = (await api('/api/youtube/channel/remove', { id: c.id })).channels; showSaved(); } catch (e) { toast(e.message, true); }
+  };
+  const add = async (c) => {
+    try {
+      saved = (await api('/api/youtube/channel', { id: c.id, name: c.name, thumb: c.thumb })).channels;
+      showSaved();
+      toast(`${c.name} adicionado`);
+    } catch (e) { toast(e.message, true); }
+  };
+  try { saved = (await api('/api/youtube')).channels; } catch (e) { toast(e.message, true); }
+  showSaved();
+  const input = sheet.querySelector('#ch-query');
+  let timer;
+  input.addEventListener('input', () => {
+    clearTimeout(timer);
+    const q = input.value.trim();
+    if (q.length < 2) { results.replaceChildren(); return; }
+    timer = setTimeout(async () => {
+      try {
+        const { channels } = await api(`/api/youtube/channels?q=${encodeURIComponent(q)}`);
+        if (input.value.trim() !== q) return;
+        results.replaceChildren(...channels.map((c) => row(c, add, 'plus', 'Adicionar')));
+      } catch (e) { results.replaceChildren(hintText(e.message)); }
+    }, 450);
+  });
+  sheetButton(sheet, 'ch-done', () => { closeSheet(); if (state.tab === 'youtube') loadYouTube(); });
+}
+
+function noteCard(iconName, title, text) {
+  const card = document.createElement('article');
+  card.className = 'note-card';
+  card.innerHTML = `${icon(iconName)}<div><strong></strong><p></p></div>`;
+  card.querySelector('strong').textContent = title;
+  card.querySelector('p').textContent = text;
+  return card;
+}
+
+function hintText(text) {
+  const p = document.createElement('p');
+  p.className = 'hint';
+  p.textContent = text;
+  return p;
+}
+
+$('yt-channels').addEventListener('click', channelsSheet);
+$('yt-search').addEventListener('search', () => loadYouTube());
+$('yt-search').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); $('yt-search').blur(); loadYouTube(); } });
 
 function shelf(title, cards) {
   const wrap = document.createElement('section');

@@ -85,10 +85,8 @@
             <i data-icon="search"></i>
             <input id="music-query" type="search" placeholder="Tocar no AuraMusic…" autocomplete="off" enterkeyhint="go">
           </label>
-          <div class="music-search-actions">
-            <button type="submit" class="pill glow"><i data-icon="play"></i>Tocar</button>
-            <button type="button" class="pill" id="music-results"><i data-icon="tv"></i>Ver na TV</button>
-          </div>
+          <button type="submit" class="round glow-btn" aria-label="Tocar" title="Tocar"><i data-icon="play"></i></button>
+          <button type="button" class="round" id="music-results" aria-label="Ver resultados na TV" title="Ver na TV"><i data-icon="tv"></i></button>
         </form>
         <div class="song-list" id="music-songs" hidden></div>
       </article>
@@ -143,7 +141,8 @@
       </div>
 
       <div class="row3">
-        <button class="pill" data-key="back"><i data-icon="back"></i>Voltar</button>
+        <button class="pill" data-key="back" id="row-back"><i data-icon="back"></i>Voltar</button>
+        <button class="pill" data-tab="keyboard" id="row-keys" hidden><i data-icon="keyboard"></i>Teclado</button>
         <button class="pill" data-key="home"><i data-icon="house"></i>Início</button>
         <button class="pill" data-key="menu"><i data-icon="menu"></i>Menu</button>
       </div>
@@ -168,6 +167,7 @@
 
     <!-- Apps -->
     <section class="view" id="view-apps" hidden>
+      <div class="page-head"><div><p class="hello-date">Na sua TV</p><h1>Apps</h1></div></div>
       <div class="segmented" id="apps-mode">
         <button data-mode="all" class="on">Todos</button>
         <button data-mode="running">Abertos <span class="count" id="running-count">0</span></button>
@@ -184,8 +184,8 @@
 
     <!-- Filmes (Stremio) -->
     <section class="view" id="view-movies" hidden>
-      <div class="movies-head">
-        <h2 class="kb-title">Filmes <span class="neon-text">e séries</span></h2>
+      <div class="page-head">
+        <div><p class="hello-date">Do seu Stremio</p><h1>Filmes e séries</h1></div>
         <button class="status" id="stremio-account"><span class="dot" id="stremio-dot"></span><span id="stremio-label">Stremio</span></button>
       </div>
       <label class="search">
@@ -197,7 +197,7 @@
 
     <!-- Teclado -->
     <section class="view" id="view-keyboard" hidden>
-      <h2 class="kb-title">Digite <span class="neon-text">direto na TV</span></h2>
+      <div class="page-head"><div><p class="hello-date">Teclado</p><h1>Digite na TV</h1></div></div>
       <p class="hint">Abra um campo de busca na TV e escreva aqui. Cada letra aparece na hora.</p>
       <textarea id="kb-input" rows="3" placeholder="Escreva aqui…" autocomplete="off" autocapitalize="off" spellcheck="false"></textarea>
       <div class="row3">
@@ -207,6 +207,19 @@
       </div>
       <p class="hint small"><i data-icon="info"></i>No YouTube e na Netflix os acentos são removidos, porque esses apps usam teclado próprio.</p>
     </section>
+
+    <!-- YouTube (sem anúncios, no SmartTube) -->
+    <section class="view" id="view-youtube" hidden>
+      <div class="page-head">
+        <div><p class="hello-date">Sem anúncios, no SmartTube</p><h1>YouTube</h1></div>
+        <button class="status" id="yt-channels"><i data-icon="pencil"></i><span>Canais</span></button>
+      </div>
+      <label class="search">
+        <i data-icon="search"></i>
+        <input id="yt-search" type="search" placeholder="Buscar vídeos" autocomplete="off" enterkeyhint="search">
+      </label>
+      <div id="yt-body"><p class="hint">Carregando…</p></div>
+    </section>
   </main>
 
   <nav class="tabbar">
@@ -214,7 +227,7 @@
     <button data-tab="remote"><i data-icon="gamepad"></i><span>Controle</span></button>
     <button data-tab="apps"><i data-icon="grid"></i><span>Apps</span></button>
     <button data-tab="movies"><i data-icon="film"></i><span>Filmes</span></button>
-    <button data-tab="keyboard"><i data-icon="keyboard"></i><span>Teclado</span></button>
+    <button data-tab="youtube"><i data-icon="youtube"></i><span>YouTube</span></button>
   </nav>
 </div>
 
