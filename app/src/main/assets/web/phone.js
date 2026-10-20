@@ -598,6 +598,52 @@ function closeSheet() {
 }
 $('sheet-backdrop').addEventListener('click', closeSheet);
 
+// Experiment: can the Fire TV wake the Xbox over HDMI? Reads what the TV's HDMI service offers
+// and, if it has a way to power on another device, lets the user try each possible address.
+async function cecSheet() {
+  const sheet = openSheet(`
+    <div class="sheet-head"><div><h3>Teste do HDMI-CEC</h3><p>Deixe o Xbox desligado e toque em uma tentativa por vez, olhando se ele liga</p></div></div>
+    <div class="sheet-actions" id="cec-tries"></div>
+    <pre class="report" id="cec-report">Lendo a TV… pode levar alguns segundos.</pre>
+    <div class="sheet-actions"><button class="sheet-btn" id="cec-close">${icon('x')}Fechar</button></div>`);
+  sheetButton(sheet, 'cec-close', settingsSheet);
+  const out = sheet.querySelector('#cec-report');
+  const tries = sheet.querySelector('#cec-tries');
+  try {
+    const r = await api('/api/debug/cec');
+    const log = [];
+    const show = () => {
+      out.textContent = [
+        ...log,
+        `Tentativas disponíveis: ${r.attempts.length || 'nenhuma: esta Fire TV não oferece como ligar outro aparelho'}`,
+        `\nServiço: ${r.service}`,
+        `\nComando cmd: ${r.cmd}`,
+        `\nChamadas de leitura:\n${r.calls.join('\n') || 'nenhuma'}`,
+        `\nFunções do HDMI (${r.methods.length}):\n${r.methods.join('\n')}`,
+        `\nPropriedades:\n${r.props}`,
+        `\nDispositivos: ${r.nodes}`,
+        `\nEstado do HDMI:\n${r.dumpsys}`,
+      ].join('\n');
+    };
+    show();
+    for (const a of r.attempts) {
+      const btn = document.createElement('button');
+      btn.className = 'sheet-btn';
+      btn.innerHTML = icon('power');
+      btn.append(a.label);
+      btn.onclick = async () => {
+        toast('Enviando… olhe o Xbox');
+        try {
+          const res = await api('/api/debug/cec/try', { id: a.id });
+          log.unshift(`[${a.label}]\n${res.output}\n`);
+        } catch (e) { log.unshift(`[${a.label}] erro: ${e.message}\n`); }
+        show();
+      };
+      tries.append(btn);
+    }
+  } catch (e) { out.textContent = e.message; }
+}
+
 function sheetButton(sheet, id, handler) {
   sheet.querySelector(`#${id}`)?.addEventListener('click', handler);
 }
@@ -758,6 +804,7 @@ function settingsSheet() {
       <button class="sheet-btn" id="s-name">${icon('pencil')}Nome na tela da TV: <span id="s-name-value"></span></button>
       <button class="sheet-btn" id="s-saver">${icon('image')}Tela de descanso</button>
       <button class="sheet-btn" id="s-system">${icon('search')}Diagnóstico das configurações da TV</button>
+      <button class="sheet-btn" id="s-cec">${icon('power')}Teste do HDMI-CEC (ligar o Xbox)</button>
       <button class="sheet-btn" id="s-player">${icon('play')}Player da TV</button>
       <button class="sheet-btn" id="s-pin">${icon('lock')}${s.requirePin ? 'Parar de pedir PIN' : 'Pedir PIN para novos celulares'}</button>
       ${native?.updateTv ? `<button class="sheet-btn primary" id="s-update-tv">${icon('download')}Atualizar a TV pelo celular</button>` : ''}
@@ -801,6 +848,7 @@ function settingsSheet() {
         `Entradas (${r.inputs.length}):\n${r.inputs.join('\n') || 'nenhuma'}\n\nTelas do app de configurações (${r.screens.length}):\n${r.screens.join('\n')}`;
     } catch (e) { report.querySelector('#s-system-report').textContent = e.message; }
   });
+  sheetButton(sheet, 's-cec', cecSheet);
   const nameValue = sheet.querySelector('#s-name-value');
   if (nameValue) nameValue.textContent = s.homeName || '–';
   sheetButton(sheet, 's-name', () => {

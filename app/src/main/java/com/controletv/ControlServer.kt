@@ -238,6 +238,11 @@ class ControlServer(
 
             path == "/api/debug/system" -> ok(SystemShortcuts.report(context))
 
+            // Experiment: waking the Xbox over HDMI-CEC (see CecProbe)
+            path == "/api/debug/cec" -> ok(CecProbe.report())
+
+            path == "/api/debug/cec/try" && post -> ok(JSONObject().put("output", CecProbe.attempt(body(session).getString("id"))))
+
             path == "/api/stremio" -> ok(Stremio.status(context))
 
             path == "/api/stremio/login" && post -> {
