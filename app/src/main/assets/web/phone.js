@@ -871,7 +871,7 @@ function settingsSheet() {
       <button class="sheet-btn" id="s-saver">${icon('image')}Tela de descanso</button>
       <button class="sheet-btn" id="s-system">${icon('search')}Diagnóstico das configurações da TV</button>
       <button class="sheet-btn" id="s-cec">${icon('power')}Teste do HDMI-CEC (ligar o Xbox)</button>
-      ${native ? `<button class="sheet-btn" id="s-device">${icon('download')}Instalar em outro aparelho (projetor, TV box)</button>` : ''}
+      ${native ? `<button class="sheet-btn" id="s-other-device">${icon('download')}Instalar em outro aparelho (projetor, TV box)</button>` : ''}
       <button class="sheet-btn" id="s-player">${icon('play')}Player da TV</button>
       <button class="sheet-btn" id="s-pin">${icon('lock')}${s.requirePin ? 'Parar de pedir PIN' : 'Pedir PIN para novos celulares'}</button>
       ${native?.updateTv ? `<button class="sheet-btn primary" id="s-update-tv">${icon('download')}Atualizar a TV pelo celular</button>` : ''}
@@ -916,7 +916,7 @@ function settingsSheet() {
     } catch (e) { report.querySelector('#s-system-report').textContent = e.message; }
   });
   sheetButton(sheet, 's-cec', cecSheet);
-  sheetButton(sheet, 's-device', deviceSheet);
+  sheetButton(sheet, 's-other-device', deviceSheet);
   const nameValue = sheet.querySelector('#s-name-value');
   if (nameValue) nameValue.textContent = s.homeName || '–';
   sheetButton(sheet, 's-name', () => {
