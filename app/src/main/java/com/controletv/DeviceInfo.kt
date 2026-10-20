@@ -13,3 +13,6 @@ fun deviceName(context: Context): String {
     ).firstOrNull { !it.isNullOrBlank() && it != Build.MODEL }
     return named ?: if (HomeWatcher.isFireTv(context)) "Fire TV" else Build.MODEL
 }
+
+/** What the phone's start screen calls this device: the Fire TV is "tv", anything else "projetor". */
+fun deviceKind(context: Context): String = if (HomeWatcher.isFireTv(context)) "tv" else "projetor"

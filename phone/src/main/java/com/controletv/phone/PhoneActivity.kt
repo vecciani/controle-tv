@@ -85,8 +85,7 @@ class PhoneActivity : Activity() {
         super.onCreate(savedInstanceState)
         window.statusBarColor = BG
         window.navigationBarColor = BG
-        val host = prefs.getString("host", null)
-        if (host == null) showDiscovery(null) else showController(host)
+        showPicker(null)
     }
 
     override fun onResume() {
@@ -126,16 +125,10 @@ class PhoneActivity : Activity() {
 
         // Check the TV answers before loading: an IP that changed would otherwise hang on a black screen
         Thread {
-            val name = hello(host)
-            val alive = name != null
-            // Devices paired before the list existed join it on their next connection
-            if (name != null) {
-                val saved = savedDevices()
-                if (saved.optString(host) != name) prefs.edit().putString("devices", saved.put(host, name).toString()).apply()
-            }
+            val alive = hello(host) != null
             main.post {
                 if (isFinishing) return@post
-                if (!alive) showDiscovery("A TV não respondeu em $host. Procurando de novo…", failedHost = host)
+                if (!alive) showPicker("Não respondeu em $host. Toque de novo para procurar.")
                 else loadController(host, frame, status, jsError)
             }
         }.start()
@@ -161,11 +154,11 @@ class PhoneActivity : Activity() {
                 }
 
                 override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
-                    if (request.isForMainFrame) main.post { showDiscovery("Erro ao abrir a TV em $host: ${error.description}", failedHost = host) }
+                    if (request.isForMainFrame) main.post { showPicker("Erro ao abrir em $host: ${error.description}") }
                 }
 
                 override fun onReceivedHttpError(view: WebView, request: WebResourceRequest, response: WebResourceResponse) {
-                    if (request.isForMainFrame) main.post { showDiscovery("A TV respondeu com erro ${response.statusCode}. Atualize o app da TV.", failedHost = host) }
+                    if (request.isForMainFrame) main.post { showPicker("Respondeu com erro ${response.statusCode}. Atualize o Controle TV nele.") }
                 }
             }
             // Shows JavaScript errors on screen instead of leaving it blank
@@ -199,17 +192,21 @@ class PhoneActivity : Activity() {
         frame.addView(view, 0, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
         frame.addView(jsError, FrameLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT, Gravity.BOTTOM))
         main.postDelayed({
-            if (!finished && web === view) showDiscovery("A tela da TV demorou demais para carregar.", failedHost = host)
+            if (!finished && web === view) showPicker("A tela demorou demais para carregar. Toque de novo.")
         }, 12_000)
     }
 
-    /** Asks a host whether it's our TV server; returns its name or null. */
-    private fun hello(ip: String): String? = try {
+    /** What a Controle TV server says about itself. */
+    private data class Hello(val ip: String, val name: String, val kind: String)
+
+    /** Asks a host whether it's our TV server. Older TV versions don't say their kind: they're the Fire TV. */
+    private fun hello(ip: String): Hello? = try {
         val conn = URL("http://$ip:8765/api/hello").openConnection() as HttpURLConnection
         conn.connectTimeout = 2_500
         conn.readTimeout = 2_500
         val json = JSONObject(conn.inputStream.use { it.readBytes().decodeToString() })
-        json.optString("name", "Fire TV").takeIf { json.optString("app") == "controle-tv" }
+        if (json.optString("app") != "controle-tv") null
+        else Hello(ip, json.optString("name", "TV"), json.optString("kind", "tv"))
     } catch (e: Exception) {
         null
     }
@@ -381,35 +378,14 @@ class PhoneActivity : Activity() {
         fun hasGyroscope(): Boolean = (getSystemService(SENSOR_SERVICE) as android.hardware.SensorManager)
             .getDefaultSensor(android.hardware.Sensor.TYPE_GYROSCOPE) != null
 
+        /** Back to the start screen (TV or Projetor). */
         @JavascriptInterface
-        fun forgetTv() {
-            main.post {
-                prefs.edit().remove("host").apply()
-                showDiscovery(null)
-            }
-        }
-
-        /** Every device used before (Fire TV, projector…), the current one marked. */
-        @JavascriptInterface
-        fun devices(): String {
-            val current = prefs.getString("host", null)
-            val saved = savedDevices()
-            return JSONArray(saved.keys().asSequence().map { ip ->
-                JSONObject().put("ip", ip).put("name", saved.optString(ip)).put("current", ip == current)
-            }.toList()).toString()
+        fun chooseDevice() {
+            main.post { showPicker(null) }
         }
 
         @JavascriptInterface
-        fun switchDevice(ip: String) {
-            main.post { choose(ip) }
-        }
-
-        @JavascriptInterface
-        fun removeDevice(ip: String) {
-            val saved = savedDevices()
-            saved.remove(ip)
-            prefs.edit().putString("devices", saved.toString()).apply()
-        }
+        fun forgetTv() = chooseDevice()
     }
 
     @Deprecated("Deprecated in Java")
@@ -554,81 +530,169 @@ class PhoneActivity : Activity() {
         super.onDestroy()
     }
 
-    // ---------- Discovery ----------
+    // ---------- Start screen: TV or Projetor ----------
 
-    private fun showDiscovery(message: String?, failedHost: String? = null) {
+    private data class Role(val id: String, val title: String, val icon: Int, val color: Int)
+
+    private val roles = listOf(
+        Role("tv", "TV", R.drawable.ic_pick_tv, CYAN),
+        Role("projetor", "Projetor", R.drawable.ic_pick_projector, VIOLET),
+    )
+
+    /** Two big choices; tapping one finds that device and opens its controls. */
+    private fun showPicker(message: String?) {
         relay?.stop()
         relay = null
         web?.destroy()
         web = null
 
-        val status = text(message ?: "Procurando a TV na rede…", 15f, MUTED)
-        val found = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        val manual = EditText(this).apply {
-            hint = "ou digite o IP da TV"
+        val status = text(message ?: "", 14f, MUTED).apply { visibility = if (message == null) android.view.View.GONE else android.view.View.VISIBLE }
+        val extra = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(BG)
+            setPadding(dp(24), dp(72), dp(24), dp(24))
+            addView(text("CONTROLE TV", 13f, CYAN, bold = true).apply { letterSpacing = 0.25f })
+            addView(text("O que você quer controlar?", 28f, TEXT, bold = true).apply { setPadding(0, dp(8), 0, dp(24)) })
+        }
+        val cards = roles.map { role -> roleCard(role) }
+        cards.forEach { (role, card, subtitle) ->
+            card.setOnClickListener { connectRole(role, subtitle, status, extra) }
+            root.addView(card, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { bottomMargin = dp(14) })
+        }
+        root.addView(status, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(8) })
+        root.addView(extra, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(12) })
+        setContentView(android.widget.ScrollView(this).apply { setBackgroundColor(BG); addView(root) })
+    }
+
+    private fun roleCard(role: Role): Triple<Role, LinearLayout, TextView> {
+        val last = prefs.getString("role", null) == role.id
+        val ip = prefs.getString("ip_${role.id}", null)
+        val subtitle = text(
+            when {
+                ip == null -> "Toque para conectar"
+                last -> "Usado por último · toque para conectar"
+                else -> "Toque para conectar"
+            }, 14f, MUTED,
+        )
+        val card = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            background = GradientDrawable().apply {
+                setColor(SURFACE)
+                cornerRadius = dp(22).toFloat()
+                setStroke(dp(if (last) 2 else 1), if (last) role.color else LINE)
+            }
+            setPadding(dp(20), dp(26), dp(20), dp(26))
+            isClickable = true
+            isFocusable = true
+        }
+        card.addView(android.widget.ImageView(this).apply {
+            setImageResource(role.icon)
+            imageTintList = android.content.res.ColorStateList.valueOf(role.color)
+        }, LinearLayout.LayoutParams(dp(48), dp(48)))
+        card.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(18), 0, 0, 0)
+            addView(text(role.title, 24f, TEXT, bold = true))
+            addView(subtitle)
+        }, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+        return Triple(role, card, subtitle)
+    }
+
+    /** Last address first; otherwise looks for that kind of device on the network. */
+    private fun connectRole(role: Role, subtitle: TextView, status: TextView, extra: LinearLayout) {
+        subtitle.text = "Conectando…"
+        status.visibility = android.view.View.GONE
+        extra.removeAllViews()
+        Thread {
+            val saved = prefs.getString("ip_${role.id}", null)
+            val found = saved?.let { hello(it) }?.takeIf { it.kind == role.id }
+                ?: run {
+                    main.post { subtitle.text = "Procurando na rede…" }
+                    scan().firstOrNull { it.kind == role.id }
+                }
+            main.post {
+                if (isFinishing) return@post
+                if (found != null) return@post choose(role, found)
+                subtitle.text = "Não encontrado"
+                status.visibility = android.view.View.VISIBLE
+                if (role.id == "projetor") {
+                    status.text = "O Controle TV não está aberto no projetor. Ligue o projetor no mesmo Wi-Fi do celular. Se ainda não instalou, instale abaixo (precisa da Depuração USB ligada nele)."
+                    extra.addView(button("Instalar o Controle TV no projetor", VIOLET, BG) { installOnProjector(status, extra) })
+                } else {
+                    status.text = "Não achei a TV. Confira se a Fire TV está ligada, no mesmo Wi-Fi do celular, com o Controle TV instalado."
+                }
+                extra.addView(manualEntry(role), LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(12) })
+            }
+        }.start()
+    }
+
+    /** Fallback: type the address by hand. */
+    private fun manualEntry(role: Role): LinearLayout {
+        val field = EditText(this).apply {
+            hint = "ou digite o endereço (ex.: 10.97.161.212)"
             setHintTextColor(MUTED)
             setTextColor(TEXT)
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
             background = rounded(SURFACE, LINE)
             setPadding(dp(16), dp(14), dp(16), dp(14))
         }
-        val connect = button("Conectar", CYAN, BG) {
-            val ip = manual.text.toString().trim()
-            if (ip.isNotEmpty()) choose(ip)
-        }
-        val again = button("Procurar de novo", SURFACE, TEXT) { showDiscovery(null) }
-
-        val root = LinearLayout(this).apply {
+        return LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(BG)
-            setPadding(dp(24), dp(72), dp(24), dp(24))
-            addView(text("CONTROLE TV", 13f, CYAN, bold = true).apply { letterSpacing = 0.25f })
-            addView(text("Encontrar a TV", 30f, TEXT, bold = true).apply { setPadding(0, dp(8), 0, dp(4)) })
-            addView(text("Fire TV, projetor ou TV box com o Controle TV aberto", 14f, MUTED))
-            addView(status)
-            addView(found, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(20) })
-            addView(manual, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(24) })
-            addView(connect, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(10) })
-            addView(again, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(10) })
+            addView(field)
+            addView(button("Conectar neste endereço", SURFACE, TEXT) {
+                val ip = field.text.toString().trim()
+                if (ip.isEmpty()) return@button
+                Thread {
+                    val h = hello(ip)
+                    main.post { if (h != null) choose(role, h) else toast("Nada respondeu em $ip") }
+                }.start()
+            }, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(10) })
         }
-        setContentView(root)
+    }
 
+    /** Finds the projector over ADB, installs Controle TV on it, then connects. */
+    private fun installOnProjector(status: TextView, extra: LinearLayout) {
+        extra.removeAllViews()
+        status.text = "Procurando o projetor (Depuração USB ligada)…"
         Thread {
-            val tvs = scan()
+            val result = runCatching {
+                val tvIp = prefs.getString("ip_tv", null)
+                val ips = deviceSetup.scan().let { a -> List(a.length()) { a.getString(it) } }.filter { it != tvIp }
+                if (ips.isEmpty()) throw IllegalStateException("Nenhum aparelho com Depuração USB ligada. No projetor: Configurações → Sobre → toque 7 vezes em Versão; depois ative a Depuração USB.")
+                // The Fire TV also answers ADB: skip anything made by Amazon
+                main.post { status.text = "Olhe o projetor: aceite \"Permitir depuração\" (marque Sempre permitir)…" }
+                val projector = ips.firstNotNullOfOrNull { ip ->
+                    runCatching { deviceSetup.describe(ip) }.getOrNull()?.takeIf { !it.optString("maker").contains("amazon", ignoreCase = true) }
+                } ?: throw IllegalStateException("Não consegui falar com o projetor. Aceite \"Permitir depuração\" nele e tente de novo.")
+                deviceSetup.installTvApp(projector.getString("ip")) { step -> main.post { status.text = step } }
+                main.post { status.text = "Instalado! Abrindo…" }
+                // Give the app a moment to start its server
+                var found: Hello? = null
+                repeat(10) { if (found == null) { Thread.sleep(1_500); found = hello(projector.getString("ip")) } }
+                found ?: throw IllegalStateException("Instalado, mas ainda não abriu. Abra o Controle TV no projetor e toque em Projetor de novo.")
+            }
             main.post {
-                if (web != null) return@post
-                if (tvs.isEmpty()) {
-                    status.text = (message?.let { "$it\n\n" } ?: "") +
-                        "Nenhuma TV encontrada. Abra o Controle TV na TV e confira se o celular está no mesmo Wi-Fi (ou com o hotspot ligado)."
-                } else {
-                    status.text = message ?: "Toque na sua TV:"
-                    tvs.forEach { (ip, name) ->
-                        found.addView(
-                            button("$name  ·  $ip", SURFACE, TEXT) { choose(ip, name) },
-                            LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { bottomMargin = dp(10) }
-                        )
+                if (isFinishing) return@post
+                result.onSuccess { choose(roles.first { it.id == "projetor" }, it) }
+                    .onFailure { e ->
+                        status.text = e.message ?: "Falhou"
+                        extra.addView(button("Tentar de novo", VIOLET, BG) { installOnProjector(status, extra) })
                     }
-                    if (tvs.size == 1 && tvs[0].first != failedHost) choose(tvs[0].first, tvs[0].second)
-                }
             }
         }.start()
     }
 
-    private fun choose(ip: String, name: String? = null) {
-        val saved = savedDevices()
-        val label = name ?: saved.optString(ip).ifEmpty { "TV" }
-        // Hotspot addresses change: the same device found at a new address replaces the old entry
-        saved.keys().asSequence().toList().filter { it != ip && saved.optString(it) == label }.forEach { saved.remove(it) }
-        saved.put(ip, label)
-        prefs.edit().putString("host", ip).putString("devices", saved.toString()).apply()
-        showController(ip)
+    private fun choose(role: Role, device: Hello) {
+        prefs.edit().putString("host", device.ip).putString("ip_${role.id}", device.ip).putString("role", role.id).apply()
+        showController(device.ip)
     }
 
-    /** ip → name of the devices used before. */
-    private fun savedDevices(): JSONObject = runCatching { JSONObject(prefs.getString("devices", "{}")!!) }.getOrDefault(JSONObject())
+    private fun toast(message: String) = android.widget.Toast.makeText(this, message, android.widget.Toast.LENGTH_SHORT).show()
 
     /** Looks for our TV server (port 8765) on every /24 network the phone is on. */
-    private fun scan(): List<Pair<String, String>> {
+    private fun scan(): List<Hello> {
         val prefixes = NetworkInterface.getNetworkInterfaces().toList()
             .filter { it.isUp && !it.isLoopback }
             .flatMap { it.inetAddresses.toList() }
@@ -636,16 +700,14 @@ class PhoneActivity : Activity() {
             .map { it.hostAddress!!.substringBeforeLast('.') }
             .distinct()
         val pool = Executors.newFixedThreadPool(48)
-        val results = java.util.Collections.synchronizedList(mutableListOf<Pair<String, String>>())
+        val results = java.util.Collections.synchronizedList(mutableListOf<Hello>())
         for (prefix in prefixes) for (i in 1..254) {
             val ip = "$prefix.$i"
-            pool.execute {
-                hello(ip)?.let { results += ip to it }
-            }
+            pool.execute { hello(ip)?.let { results += it } }
         }
         pool.shutdown()
         pool.awaitTermination(20, TimeUnit.SECONDS)
-        return results.sortedBy { it.first }
+        return results.sortedBy { it.ip }
     }
 
     // ---------- Small view helpers ----------
@@ -687,5 +749,6 @@ class PhoneActivity : Activity() {
         val TEXT = Color.parseColor("#F2F2F7")
         val MUTED = Color.parseColor("#8A8AA3")
         val CYAN = Color.parseColor("#22D3EE")
+        val VIOLET = Color.parseColor("#A855F7")
     }
 }

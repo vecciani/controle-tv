@@ -373,7 +373,7 @@ async function refreshStatus() {
     const [dot, text] = STATUS[s.adb] || STATUS.off;
     $('status-dot').className = `dot ${dot}`;
     $('status-text').textContent = text;
-    $('device-name').textContent = s.name || '';
+    $('device-name').textContent = s.kind === 'projetor' ? 'Projetor' : s.kind === 'tv' ? 'TV' : '';
     renderNow(s.foreground);
   } catch {
     $('status-dot').className = 'dot off';
@@ -711,43 +711,11 @@ async function deviceSheet() {
   scan();
 }
 
-// ---------- Devices: Fire TV, projector… each runs its own Controle TV; switch with one tap ----------
+// ---------- TV or projector: switching goes back to the phone app's start screen ----------
 
 function devicesSheet() {
-  const list = native?.devices ? JSON.parse(native.devices()) : [];
-  const sheet = openSheet(`
-    <div class="sheet-head"><div><h3>Seus aparelhos</h3><p>Toque para controlar outro aparelho</p></div></div>
-    <div id="dev-saved"></div>
-    <div class="sheet-actions">
-      <button class="sheet-btn primary" id="dev-add">${icon('search')}Procurar aparelho na rede</button>
-      <button class="sheet-btn" id="dev-install">${icon('download')}Instalar o Controle TV em outro aparelho</button>
-      <button class="sheet-btn" id="dev-done">${icon('x')}Fechar</button>
-    </div>`);
-  const box = sheet.querySelector('#dev-saved');
-  if (!list.length) box.append(hintText(native ? 'Nenhum aparelho salvo ainda' : 'Use o app Controle TV do celular para trocar de aparelho'));
-  for (const d of list) {
-    const row = document.createElement('div');
-    row.className = 'channel-row device-row' + (d.current ? ' on' : '');
-    row.innerHTML = `${icon('tv')}<div><strong></strong><small></small></div>`;
-    row.querySelector('strong').textContent = d.name;
-    row.querySelector('small').textContent = d.current ? `Controlando agora · ${d.ip}` : d.ip;
-    if (!d.current) {
-      const go = document.createElement('button');
-      go.className = 'pill glow';
-      go.textContent = 'Usar';
-      go.onclick = () => { toast(`Conectando em ${d.name}…`); native.switchDevice(d.ip); };
-      const del = document.createElement('button');
-      del.className = 'round';
-      del.setAttribute('aria-label', 'Esquecer');
-      del.innerHTML = icon('trash');
-      del.onclick = () => { native.removeDevice(d.ip); row.remove(); };
-      row.append(go, del);
-    }
-    box.append(row);
-  }
-  sheetButton(sheet, 'dev-add', () => native?.forgetTv());
-  sheetButton(sheet, 'dev-install', deviceSheet);
-  sheetButton(sheet, 'dev-done', closeSheet);
+  if (native?.chooseDevice) native.chooseDevice();
+  else toast('Use o app Controle TV do celular para trocar de aparelho', true);
 }
 
 $('device-switch').addEventListener('click', devicesSheet);
