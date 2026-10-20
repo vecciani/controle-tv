@@ -619,6 +619,7 @@ async function cecSheet() {
     const show = () => {
       out.textContent = [
         ...log,
+        `A TV está mostrando a Fire TV agora: ${r.onScreen}`,
         `Tentativas disponíveis: ${r.attempts.length || 'nenhuma: esta Fire TV não oferece como ligar outro aparelho'}`,
         `\nServiço: ${r.service}`,
         `\nComando cmd: ${r.cmd}`,

@@ -54,6 +54,9 @@ object ScreenSaver {
         val power = context.getSystemService(Context.POWER_SERVICE) as PowerManager
         if (!power.isInteractive) return
         if (watchingVideo(context)) { touch(); return }
+        // The TV is on another HDMI input (console, cable box…): don't start, which could also
+        // pull the TV back to the Fire TV. Checked again after another idle period.
+        if (HdmiInput.fireTvOnScreen() == false) { touch(); return }
         start(context)
     }
 

@@ -57,6 +57,7 @@ object CecProbe {
         val getters = listOf("getSupportedTypes", "getPhysicalAddress", "getActiveSource", "getPortInfo", "getDeviceList", "getInputDevices")
         val calls = getters.mapNotNull { name -> codes[name]?.let { "$name → " + sh("service call hdmi_control $it").take(600) } }
         return JSONObject()
+            .put("onScreen", when (HdmiInput.fireTvOnScreen()) { true -> "sim"; false -> "não (outra entrada HDMI)"; null -> "não dá para saber" })
             .put("methods", JSONArray(codes.entries.sortedBy { it.value }.map { (name, code) -> "$code  $name(${signatures[name] ?: "?"})" }))
             .put("attempts", JSONArray(attempts().map { JSONObject().put("id", it.id).put("label", it.label) }))
             .put("calls", JSONArray(calls))
