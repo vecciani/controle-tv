@@ -263,6 +263,30 @@ class ControlServer(
                 ok(JSONObject().put("metas", Stremio.catalog(type, session.parameters["q"]?.firstOrNull())))
             }
 
+            // Projector: brightness and Bluetooth
+            path == "/api/projector" -> ok(Projector.status(context))
+
+            path == "/api/projector/brightness" && post -> {
+                val body = body(session)
+                val target = if (body.has("delta")) Projector.brightnessPercent(context) + body.getInt("delta") else body.getInt("value")
+                ok(JSONObject().put("brightness", Projector.setBrightness(context, target)))
+            }
+
+            path == "/api/projector/bluetooth" && post -> {
+                Projector.setBluetooth(body(session).getBoolean("on"))
+                ok(Projector.status(context))
+            }
+
+            path == "/api/projector/bluetooth/settings" && post -> {
+                Projector.openBluetoothSettings(context)
+                ok()
+            }
+
+            // A genre of Stremio's catalog (the projector's phone screen has many genre rows)
+            path == "/api/stremio/genre" -> ok(JSONObject().put("metas", JSONArray(Stremio.genre(
+                session.parameters["type"]?.firstOrNull() ?: "movie", session.parameters["genre"]?.firstOrNull().orEmpty(),
+            ))))
+
             // YouTube without ads: channels picked on the phone, videos opened in SmartTube
             path == "/api/youtube" -> ok(YouTube.status(context))
 

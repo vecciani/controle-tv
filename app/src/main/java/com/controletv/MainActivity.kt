@@ -155,6 +155,14 @@ class MainActivity : Activity() {
     private var shownChanges = -1
 
     private val unit by lazy { resources.displayMetrics.widthPixels / 100f } // 1% of screen width
+    /** Projector mode: no music or YouTube; brightness, Bluetooth and many more film rows instead. */
+    private val isProjector by lazy { deviceKind(this) == "projetor" }
+    private val tabs by lazy { if (isProjector) TABS.filter { it.first != "youtube" } else TABS }
+    private var popularMovies: List<JSONObject> = emptyList()
+    private var popularSeries: List<JSONObject> = emptyList()
+    private lateinit var brightnessBar: View
+    private lateinit var brightnessLabel: TextView
+    private lateinit var bluetoothLabel: TextView
     private val screenH by lazy { resources.displayMetrics.heightPixels }
     private val screenW by lazy { resources.displayMetrics.widthPixels }
 
@@ -283,7 +291,7 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER_VERTICAL
         }
         val searchBar = Button(this).apply {
-            text = "Pesquisar no Stremio, SmartTube e AuraMusic…"
+            text = if (isProjector) "Pesquisar filmes e séries no Stremio…" else "Pesquisar no Stremio, SmartTube e AuraMusic…"
             isAllCaps = false
             textSize = px(1.2f)
             setTextColor(MUTED)
@@ -334,7 +342,8 @@ class MainActivity : Activity() {
         date = text(1.8f, 0xCCF2F2F7.toInt())
         welcome.addView(greeting)
         welcome.addView(date, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { topMargin = u(0.7f) })
-        welcome.addView(buildMusicWidget(), LinearLayout.LayoutParams(u(46f), WRAP_CONTENT).apply { topMargin = u(2.6f) })
+        welcome.addView(if (isProjector) buildProjectorWidget() else buildMusicWidget(),
+            LinearLayout.LayoutParams(u(46f), WRAP_CONTENT).apply { topMargin = u(2.6f) })
         welcome.addView(View(this), LinearLayout.LayoutParams(0, 0, 1.3f))
         header.addView(welcome, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
         // Starts filling the screen; adjusted to the exact space once laid out (see fitWelcome)
@@ -346,7 +355,7 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER_VERTICAL
             setPadding(u(2.3f), u(1.2f), u(3.5f), u(0.6f))
         }
-        TABS.forEach { (id, label, icon) ->
+        tabs.forEach { (id, label, icon) ->
             val view = tabView(id, label, icon)
             tabViews[id] = view
             tabRow.addView(view, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { rightMargin = u(0.8f) })
@@ -600,8 +609,8 @@ class MainActivity : Activity() {
     /** Opens a tab: its rows slide in from the side it was moved to. */
     private fun selectTab(id: String) {
         if (id != tab) {
-            val from = TABS.indexOfFirst { it.first == tab }
-            val to = TABS.indexOfFirst { it.first == id }
+            val from = tabs.indexOfFirst { it.first == tab }
+            val to = tabs.indexOfFirst { it.first == id }
             tab = id
             styleTabs()
             rowsScroll.scrollTo(0, 0)
@@ -622,7 +631,7 @@ class MainActivity : Activity() {
             "settings" -> "Telas da Fire TV, entradas e tela inicial"
             else -> restSummary()
         }
-        heroText(TABS.first { it.first == tab }.second, about, "Desça para escolher")
+        heroText(tabs.first { it.first == tab }.second, about, "Desça para escolher")
         heroKey = "tab"
     }
 
@@ -863,6 +872,8 @@ class MainActivity : Activity() {
     private fun mediaRows() {
         rows.addView(row("Continuar assistindo",
             if (stremioWatching.isNotEmpty()) stremioWatching.take(12).map { stremioWideCard(it) } else listOf(stremioHintCard())))
+        if (popularMovies.isNotEmpty()) rows.addView(row("Filmes em alta", popularMovies.take(MAX_PER_ROW).map { stremioPoster(it) }))
+        if (popularSeries.isNotEmpty()) rows.addView(row("Séries em alta", popularSeries.take(MAX_PER_ROW).map { stremioPoster(it) }))
         if (newMovies.isNotEmpty()) rows.addView(row("Filmes novos", newMovies.take(MAX_PER_ROW).map { stremioPoster(it) }))
         if (newSeries.isNotEmpty()) rows.addView(row("Séries novas", newSeries.take(MAX_PER_ROW).map { stremioPoster(it) }))
         genreRows.forEach { (title, items) -> if (items.isNotEmpty()) rows.addView(row(title, items.take(MAX_PER_ROW).map { stremioPoster(it) })) }
@@ -1066,8 +1077,11 @@ class MainActivity : Activity() {
             fun catalog(type: String) = runCatching { Stremio.newReleases(type, year) }.getOrDefault(emptyList())
             val movies = catalog("movie")
             val series = catalog("series")
+            fun popular(type: String) = runCatching { Stremio.catalog(type, null).let { a -> List(a.length()) { a.getJSONObject(it) } } }.getOrDefault(emptyList())
+            val topMovies = if (isProjector) popular("movie") else emptyList()
+            val topSeries = if (isProjector) popular("series") else emptyList()
             // Genre rows mix films and series, alternating
-            val genres = GENRES.map { (title, genre) ->
+            val genres = (if (isProjector) PROJECTOR_GENRES else GENRES).map { (title, genre) ->
                 val m = runCatching { Stremio.genre("movie", genre) }.getOrDefault(emptyList())
                 val t = runCatching { Stremio.genre("series", genre) }.getOrDefault(emptyList())
                 title to (0 until maxOf(m.size, t.size)).flatMap { i -> listOfNotNull(m.getOrNull(i), t.getOrNull(i)) }
@@ -1078,6 +1092,8 @@ class MainActivity : Activity() {
                 stremioWatching = items.filter { it.optBoolean("watching") }
                 newMovies = movies
                 newSeries = series
+                popularMovies = topMovies
+                popularSeries = topSeries
                 genreRows = genres
                 stremioVersion++
                 updateWelcomeBack()
@@ -1291,7 +1307,9 @@ class MainActivity : Activity() {
         private fun render(text: String, titles: List<JSONObject>) {
             results.removeAllViews()
             if (text.isEmpty()) {
-                results.addView(text(1.2f, MUTED).apply { this.text = "Busca filmes e séries no Stremio, vídeos no SmartTube e músicas no AuraMusic" })
+                results.addView(text(1.2f, MUTED).apply {
+                    this.text = if (isProjector) "Busca filmes e séries no Stremio" else "Busca filmes e séries no Stremio, vídeos no SmartTube e músicas no AuraMusic"
+                })
                 return
             }
             titles.forEach { t ->
@@ -1299,13 +1317,13 @@ class MainActivity : Activity() {
                 val year = t.optString("releaseInfo")
                 option("${t.optString("name")}  ($kind${if (year.isNotEmpty()) ", $year" else ""})  ·  abrir no Stremio") { openInStremio(t, null) }
             }
-            if (smartTube != null) {
+            if (smartTube != null && !isProjector) {
                 option("Buscar \"$text\" no SmartTube") {
                     val search = Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/results?search_query=" + Uri.encode(text))).setPackage(smartTube)
                     runCatching { startActivity(search.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }.onFailure { Apps.launch(this@MainActivity, smartTube) }
                 }
             }
-            if (MusicBridge.musicApp(this@MainActivity) != null) {
+            if (MusicBridge.musicApp(this@MainActivity) != null && !isProjector) {
                 option("Tocar \"$text\" no AuraMusic") {
                     // Searching goes over the network: off the main thread
                     Thread {
@@ -1525,6 +1543,75 @@ class MainActivity : Activity() {
     // ---------- Music chip (top bar) ----------
 
     /** OK on the chip: play/pause what's playing, or open the music app when nothing is. */
+    /** Projector: brightness (− bar +) and Bluetooth (status; OK opens the Bluetooth screen). */
+    private fun buildProjectorWidget(): View {
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(u(1.4f), u(1.2f), u(1.4f), u(1.2f))
+            background = rounded(0xCC12121D.toInt(), u(1.2f).toFloat(), VIOLET_DIM)
+        }
+        // Brightness
+        val bright = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        brightnessLabel = text(1.4f, TEXT, bold = true).apply { text = "Brilho" }
+        bright.addView(brightnessLabel, LinearLayout.LayoutParams(u(11f), WRAP_CONTENT))
+        bright.addView(mediaButton(R.drawable.ic_t_minus, false) { changeBrightness(-10) })
+        val track = FrameLayout(this).apply { background = rounded(0x33FFFFFF, u(0.4f).toFloat(), 0x00000000) }
+        brightnessBar = View(this).apply { background = rounded(CYAN, u(0.4f).toFloat(), CYAN) }
+        track.addView(brightnessBar, FrameLayout.LayoutParams(0, MATCH_PARENT))
+        bright.addView(track, LinearLayout.LayoutParams(0, u(0.8f), 1f).apply { leftMargin = u(0.8f); rightMargin = u(0.2f) })
+        bright.addView(mediaButton(R.drawable.ic_t_plus, false) { changeBrightness(10) })
+        box.addView(bright)
+        // Bluetooth
+        val bt = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            isFocusable = true
+            setPadding(u(0.6f), u(0.6f), u(0.6f), u(0.6f))
+            background = StateListDrawable().apply {
+                addState(intArrayOf(android.R.attr.state_focused), rounded(0x3322D3EE, u(1f).toFloat(), CYAN))
+                addState(intArrayOf(), rounded(Color.TRANSPARENT, u(1f).toFloat(), Color.TRANSPARENT))
+            }
+            setOnClickListener { runCatching { Projector.openBluetoothSettings(this@MainActivity) }.onFailure { toast("Não abriu o Bluetooth") } }
+        }
+        bt.addView(ImageView(this).apply { setImageResource(R.drawable.ic_t_bluetooth) }, LinearLayout.LayoutParams(u(2.6f), u(2.6f)))
+        bluetoothLabel = text(1.25f, TEXT).apply { maxLines = 2; ellipsize = TextUtils.TruncateAt.END }
+        bt.addView(bluetoothLabel, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f).apply { leftMargin = u(1f) })
+        box.addView(bt, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = u(1.2f) })
+        // Keeps the old music fields usable (they're never shown here)
+        musicBox = LinearLayout(this)
+        updateProjector()
+        return box
+    }
+
+    private fun changeBrightness(delta: Int) {
+        loader.execute {
+            val result = runCatching { Projector.setBrightness(this, Projector.brightnessPercent(this) + delta) }
+            runOnUiThread { result.onSuccess { showBrightness(it) }.onFailure { toast(it.message ?: "Não mudou o brilho") } }
+        }
+    }
+
+    private fun showBrightness(percent: Int) {
+        brightnessLabel.text = "Brilho $percent%"
+        (brightnessBar.parent as View).post {
+            val full = (brightnessBar.parent as View).width
+            brightnessBar.layoutParams = (brightnessBar.layoutParams as FrameLayout.LayoutParams).apply { width = full * percent / 100 }
+            brightnessBar.requestLayout()
+        }
+    }
+
+    private fun updateProjector() {
+        if (!::brightnessLabel.isInitialized) return
+        showBrightness(Projector.brightnessPercent(this))
+        val bt = Projector.bluetooth()
+        val connected = bt.optJSONArray("devices")?.let { a -> List(a.length()) { a.getJSONObject(it) } }?.filter { it.optBoolean("connected") }.orEmpty()
+        bluetoothLabel.text = when {
+            !bt.optBoolean("available") -> "Sem Bluetooth"
+            !bt.optBoolean("on") -> "Bluetooth desligado · OK para abrir"
+            connected.isNotEmpty() -> "Bluetooth: ${connected.joinToString { it.optString("name") }}"
+            else -> "Bluetooth ligado · OK para conectar caixa ou fone"
+        }
+    }
+
     /** The welcome screen's music player: cover, title and artist, previous / play / next. */
     private fun buildMusicWidget(): View {
         musicBox = LinearLayout(this).apply {
@@ -1586,6 +1673,7 @@ class MainActivity : Activity() {
     }
 
     private fun updateMusic() {
+        if (isProjector) return updateProjector()
         if (!MediaListener.enabled(this)) {
             // Turn the widget on by itself as soon as the phone's ADB connection allows it
             if (!askedMusicPermission && Adb.state == Adb.State.OK) {
@@ -1804,6 +1892,12 @@ class MainActivity : Activity() {
 
         /** Genre rows on the home (title shown, Stremio genre name). */
         private val GENRES = listOf("Comédia" to "Comedy", "Ficção científica" to "Sci-Fi", "Drama" to "Drama")
+        private val PROJECTOR_GENRES = listOf(
+            "Ação" to "Action", "Aventura" to "Adventure", "Comédia" to "Comedy", "Drama" to "Drama",
+            "Ficção científica" to "Sci-Fi", "Suspense" to "Thriller", "Terror" to "Horror", "Romance" to "Romance",
+            "Animação" to "Animation", "Família" to "Family", "Fantasia" to "Fantasy", "Crime" to "Crime",
+            "Mistério" to "Mystery", "Documentário" to "Documentary", "Guerra" to "War", "Faroeste" to "Western",
+        )
 
         /** Whether the home is on screen (music search brings it back afterwards). */
         @Volatile
