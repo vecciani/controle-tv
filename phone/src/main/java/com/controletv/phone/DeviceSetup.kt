@@ -76,8 +76,9 @@ class DeviceSetup(private val context: Context) {
         apk.writeBytes(TvUpdater.download(info.getString("apk")))
         try {
             progress("Instalando no aparelho…")
-            connect(ip).use { adb ->
-                adb.install(apk, "-r")
+            // Long wait: installing a 30 MB app on a slow box takes a while
+            Dadb.create(ip, PORT, keys, 3_000, 300_000).use { adb ->
+                AdbInstall.install(adb, listOf(apk))
                 adb.shell("am start -n com.controletv/.MainActivity")
             }
         } finally {

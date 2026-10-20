@@ -64,6 +64,20 @@
         <button class="quick-btn" id="q-files"><i data-icon="folder"></i><span>Arquivos</span></button>
       </div>
 
+      <!-- Projector only: brightness and Bluetooth (in place of the music card) -->
+      <article class="music-card projector-card" id="projector-card" hidden>
+        <div class="proj-row">
+          <i data-icon="sun"></i><strong>Brilho</strong><span class="proj-value" id="proj-bright-val">–</span>
+        </div>
+        <input type="range" id="proj-bright" min="5" max="100" step="5" value="50" aria-label="Brilho">
+        <div class="proj-row">
+          <i data-icon="bluetooth"></i><strong>Bluetooth</strong>
+          <button class="pill" id="proj-bt-toggle">…</button>
+        </div>
+        <div class="proj-devices" id="proj-bt-list"></div>
+        <button class="pill" id="proj-bt-pair"><i data-icon="plus"></i>Conectar caixa de som ou fone</button>
+      </article>
+
       <article class="music-card" id="music-card">
         <div class="music-top">
           <div class="music-art" id="music-art"><i data-icon="music"></i></div>

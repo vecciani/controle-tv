@@ -67,11 +67,13 @@ class Relay(context: Context, private val host: String) {
         return Dadb.create(host, PORT, keys, 3_000, 60_000)
     }
 
-    /** Installs one APK, or a set of split APKs, on the TV. */
-    @Synchronized
+    /**
+     * Installs one APK, or a set of split APKs, on the TV. Uses its own connection with a long
+     * wait: slow TV boxes take minutes on big apps, and the remote control stays responsive.
+     */
     fun install(files: List<File>) {
-        val connection = dadb ?: throw IllegalStateException("ADB não conectado")
-        if (files.size == 1) connection.install(files[0], "-r") else connection.installMultiple(files, "-r")
+        if (state != State.OK) throw IllegalStateException("O controle completo (ADB) precisa estar ativo")
+        Dadb.create(host, PORT, keys, 3_000, 300_000).use { AdbInstall.install(it, files) }
     }
 
     private fun connectLoop() {

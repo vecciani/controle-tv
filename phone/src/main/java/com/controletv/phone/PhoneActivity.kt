@@ -460,16 +460,7 @@ class PhoneActivity : Activity() {
                 relay.install(files)
                 report("done", "$label instalado na TV")
             } catch (e: Exception) {
-                val reason = e.message.orEmpty()
-                report(
-                    "error",
-                    when {
-                        "NO_MATCHING_ABIS" in reason -> "$label não é compatível com o processador da TV (versão errada: procure a armeabi-v7a ou universal)"
-                        "OLDER_SDK" in reason -> "$label precisa de um Android mais novo que o da TV"
-                        "UPDATE_INCOMPATIBLE" in reason -> "Já existe outra versão de $label na TV com assinatura diferente. Desinstale ela antes"
-                        else -> "Falhou: $reason"
-                    }
-                )
+                report("error", AdbInstall.explain(label, e.message ?: e.javaClass.simpleName))
             }
         }.start()
     }

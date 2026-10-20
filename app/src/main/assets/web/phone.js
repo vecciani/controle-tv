@@ -352,6 +352,7 @@ function showTab(tab) {
   if (tab === 'apps') loadApps();
   if (tab === 'movies') loadMovies();
   if (tab === 'youtube') loadYouTube();
+  if (tab === 'home' && kind === 'projetor') loadProjector();
   if (tab === 'keyboard') {
     setKeyboard(true);
     setTimeout(() => $('kb-input').focus(), 50);
@@ -374,12 +375,68 @@ async function refreshStatus() {
     $('status-dot').className = `dot ${dot}`;
     $('status-text').textContent = text;
     $('device-name').textContent = s.kind === 'projetor' ? 'Projetor' : s.kind === 'tv' ? 'TV' : '';
+    applyKind(s.kind);
     renderNow(s.foreground);
   } catch {
     $('status-dot').className = 'dot off';
     $('status-text').textContent = 'TV fora do ar';
   }
 }
+
+// ---------- Projector mode: no music or YouTube; brightness, Bluetooth and more film rows ----------
+
+let kind = null;
+
+function applyKind(next) {
+  const projector = next === 'projetor';
+  $('music-card').hidden = projector;
+  $('projector-card').hidden = !projector;
+  document.querySelector('.tabbar [data-tab="youtube"]').hidden = projector;
+  if (projector && state.tab === 'youtube') showTab('home');
+  if (projector && state.tab === 'home') loadProjector();
+  kind = next;
+}
+
+async function loadProjector() {
+  let p;
+  try { p = await api('/api/projector'); } catch { return; }
+  const slider = $('proj-bright');
+  if (document.activeElement !== slider) slider.value = p.brightness;
+  $('proj-bright-val').textContent = `${p.brightness}%`;
+  const bt = p.bluetooth || {};
+  const toggle = $('proj-bt-toggle');
+  toggle.hidden = !bt.available;
+  toggle.textContent = bt.on ? 'Ligado' : 'Desligado';
+  toggle.classList.toggle('glow', !!bt.on);
+  toggle.dataset.on = bt.on ? '1' : '';
+  $('proj-bt-list').replaceChildren(...(bt.devices || []).map((d) => {
+    const row = document.createElement('div');
+    row.className = 'proj-device';
+    row.innerHTML = '<span></span><small></small>';
+    row.querySelector('span').textContent = d.name;
+    const small = row.querySelector('small');
+    small.textContent = d.connected ? 'conectado' : d.kind;
+    small.classList.toggle('on', d.connected);
+    return row;
+  }));
+}
+
+$('proj-bright').addEventListener('input', () => { $('proj-bright-val').textContent = `${$('proj-bright').value}%`; });
+$('proj-bright').addEventListener('change', async () => {
+  try {
+    const r = await api('/api/projector/brightness', { value: Number($('proj-bright').value) });
+    $('proj-bright-val').textContent = `${r.brightness}%`;
+  } catch (e) { toast(e.message, true); }
+});
+$('proj-bt-toggle').addEventListener('click', async () => {
+  const on = !$('proj-bt-toggle').dataset.on;
+  try { await api('/api/projector/bluetooth', { on }); toast(on ? 'Ligando o Bluetooth' : 'Desligando o Bluetooth'); setTimeout(loadProjector, 1500); }
+  catch (e) { toast(e.message, true); }
+});
+$('proj-bt-pair').addEventListener('click', async () => {
+  try { await api('/api/projector/bluetooth/settings', {}); toast('Abrindo o Bluetooth no projetor: escolha a caixa ou o fone com o controle'); }
+  catch (e) { toast(e.message, true); }
+});
 
 function renderNow(fg) {
   const art = $('now-art');
@@ -650,76 +707,6 @@ async function cecSheet() {
   } catch (e) { out.textContent = e.message; }
 }
 
-// Puts Controle TV on another device on the network (a projector, a TV box) through ADB:
-// the device needs "USB debugging" on, and asks "Allow debugging?" the first time.
-async function deviceSheet() {
-  const sheet = openSheet(`
-    <div class="sheet-head"><div><h3>Instalar em outro aparelho</h3><p>No aparelho: ative as Opções do desenvolvedor e a Depuração USB, e conecte no mesmo Wi-Fi do celular</p></div></div>
-    <div id="dev-list"><p class="hint">Procurando aparelhos na rede…</p></div>
-    <div class="sheet-actions">
-      <button class="sheet-btn" id="dev-rescan">${icon('refresh')}Procurar de novo</button>
-      <button class="sheet-btn" id="dev-close">${icon('x')}Fechar</button>
-    </div>`);
-  sheetButton(sheet, 'dev-close', settingsSheet);
-  const list = sheet.querySelector('#dev-list');
-  const scan = async () => {
-    list.replaceChildren(hintText('Procurando aparelhos na rede…'));
-    let ips;
-    try {
-      const raw = await nativeCall('scanDevices');
-      ips = typeof raw === 'string' ? JSON.parse(raw) : raw;
-    } catch (e) { list.replaceChildren(hintText(e.message)); return; }
-    if (!ips.length) {
-      list.replaceChildren(hintText('Nenhum aparelho com depuração ligada. Confira a Depuração USB e se ele está no mesmo Wi-Fi.'));
-      return;
-    }
-    list.replaceChildren(...ips.map((ip) => deviceRow(ip)));
-  };
-  const deviceRow = (ip) => {
-    const row = document.createElement('div');
-    row.className = 'channel-row';
-    row.innerHTML = `${icon('tv')}<div><strong></strong><small>Toque em "Ver" e aceite a depuração no aparelho</small></div><button class="pill">Ver</button>`;
-    row.querySelector('strong').textContent = ip;
-    const small = row.querySelector('small');
-    const btn = row.querySelector('button');
-    btn.onclick = async () => {
-      btn.disabled = true;
-      small.textContent = 'Olhe o aparelho: aceite "Permitir depuração"…';
-      try {
-        const raw = await nativeCall('describeDevice', { ip });
-        const d = typeof raw === 'string' ? JSON.parse(raw) : raw;
-        row.querySelector('strong').textContent = [d.maker, d.model].filter(Boolean).join(' ') || ip;
-        small.textContent = `Android ${d.android || '?'} · ${ip}${d.installed ? ' · Controle TV já instalado' : ''}`;
-        btn.textContent = d.installed ? 'Atualizar' : 'Instalar';
-        btn.disabled = false;
-        btn.onclick = async () => {
-          btn.disabled = true;
-          try {
-            const msg = await nativeCall('installTvApp', { ip });
-            toast(typeof msg === 'string' ? msg.replace(/^"|"$/g, '') : 'Instalado');
-            small.textContent = `Instalado. Para controlar ele: Ajustes → Trocar de TV · ${ip}`;
-          } catch (e) { toast(e.message, true); btn.disabled = false; }
-        };
-      } catch (e) {
-        small.textContent = e.message || 'Não respondeu: aceite a depuração no aparelho e tente de novo';
-        btn.disabled = false;
-      }
-    };
-    return row;
-  };
-  sheetButton(sheet, 'dev-rescan', scan);
-  scan();
-}
-
-// ---------- TV or projector: switching goes back to the phone app's start screen ----------
-
-function devicesSheet() {
-  if (native?.chooseDevice) native.chooseDevice();
-  else toast('Use o app Controle TV do celular para trocar de aparelho', true);
-}
-
-$('device-switch').addEventListener('click', devicesSheet);
-
 function sheetButton(sheet, id, handler) {
   sheet.querySelector(`#${id}`)?.addEventListener('click', handler);
 }
@@ -857,51 +844,40 @@ const ADB_HELP = {
 function settingsSheet() {
   const s = state.status || {};
   const [dot, text] = STATUS[s.adb] || STATUS.off;
+  const projector = s.kind === 'projetor';
   const sheet = openSheet(`
-    <div class="sheet-head"><div><h3>Ajustes</h3><p>Controle TV</p></div></div>
-    <div class="kv"><span>Controle</span><span><span class="dot ${dot}"></span> ${text}${s.via ? ` (via ${s.via})` : ''}</span></div>
-    ${ADB_HELP[s.adb] ? `<p class="body" style="margin-top:12px">Para liberar o controle completo:</p>${ADB_HELP[s.adb]}` : ''}
-    ${s.adbError ? `<div class="kv"><span>Detalhe</span><span class="mono" id="s-adb-error"></span></div>` : ''}
-    <div class="kv"><span>Aparelho</span><span id="s-device"></span></div>
-    ${native ? `<div class="kv"><span>App do celular</span><span>versão ${native.version?.() ?? '?'}</span></div>` : ''}
-    ${native ? `<div class="kv"><span>Mouse aéreo</span><span class="mono" id="s-air"></span></div>` : ''}
-    ${s.lastPlay ? `<div class="kv"><span>Último vídeo</span><span class="mono" id="s-last-play"></span></div>` : ''}
-    ${s.lastFields ? `<div class="kv"><span>Campos do app</span><span class="mono" id="s-last-fields"></span></div>` : ''}
-    <div class="kv"><span>Versão do app</span><span>${s.version ?? '–'}</span></div>
-    <div class="kv"><span>Versão das telas</span><span>${s.webVersion ?? '–'}</span></div>
-    <div class="kv"><span>Atualização</span><span id="s-update-text"></span></div>
-    <div class="sheet-actions" style="margin-top:16px">
+    <div class="sheet-head"><div><h3>Ajustes</h3><p>${projector ? 'Projetor' : 'TV'} · <span class="dot ${dot}"></span> ${text}</p></div></div>
+    ${ADB_HELP[s.adb] ? `<p class="body" style="margin-top:4px">Para liberar o controle completo:</p>${ADB_HELP[s.adb]}` : ''}
+    <div class="sheet-actions">
+      ${s.adb !== 'ok' ? `<button class="sheet-btn primary" id="s-retry">${icon('refresh')}Tentar conectar de novo</button>` : ''}
+      ${native ? `<button class="sheet-btn" id="s-forget">${icon('tv')}Trocar entre TV e projetor</button>` : ''}
       ${s.adb !== 'ok' && !native ? `<a class="sheet-btn primary" href="${PHONE_APP_URL}">${icon('download')}Baixar app do celular</a>` : ''}
-      ${native ? `<button class="sheet-btn" id="s-forget">${icon('tv')}Trocar de aparelho</button>` : ''}
-      ${s.adb !== 'ok' ? `<button class="sheet-btn primary" id="s-retry">${icon('refresh')}Tentar conectar de novo</button>
-      <button class="sheet-btn" id="s-probe">${icon('search')}Diagnóstico detalhado</button>` : ''}
-      ${s.updatePending ? `<button class="sheet-btn primary" id="s-install">${icon('download')}Instalar atualização baixada</button>` : ''}
+    </div>
+
+    <h4>Tela ${projector ? 'do projetor' : 'da TV'}</h4>
+    <div class="sheet-actions">
       <button class="sheet-btn${s.homeLauncher ? ' primary' : ''}" id="s-home">${icon('house')}${s.homeLauncher ? 'Controle TV é a tela inicial (desligar)' : 'Usar o Controle TV como tela inicial'}</button>
-      <button class="sheet-btn" id="s-name">${icon('pencil')}Nome na tela da TV: <span id="s-name-value"></span></button>
+      <button class="sheet-btn" id="s-name">${icon('pencil')}Nome na saudação: <span id="s-name-value"></span></button>
       <button class="sheet-btn" id="s-saver">${icon('image')}Tela de descanso</button>
-      <button class="sheet-btn" id="s-system">${icon('search')}Diagnóstico das configurações da TV</button>
-      <button class="sheet-btn" id="s-cec">${icon('power')}Teste do HDMI-CEC (ligar o Xbox)</button>
-      ${native ? `<button class="sheet-btn" id="s-other-device">${icon('download')}Instalar em outro aparelho (projetor, TV box)</button>` : ''}
-      <button class="sheet-btn" id="s-player">${icon('play')}Player da TV</button>
-      <button class="sheet-btn" id="s-pin">${icon('lock')}${s.requirePin ? 'Parar de pedir PIN' : 'Pedir PIN para novos celulares'}</button>
-      ${native?.updateTv ? `<button class="sheet-btn primary" id="s-update-tv">${icon('download')}Atualizar a TV pelo celular</button>` : ''}
+      <button class="sheet-btn" id="s-player">${icon('play')}Player de vídeo</button>
+    </div>
+
+    <h4>Atualização</h4>
+    <div class="kv"><span>Versões</span><span>${projector ? 'projetor' : 'TV'} ${s.version ?? '–'} · telas ${s.webVersion ?? '–'}${native ? ` · celular ${native.version?.() ?? '?'}` : ''}</span></div>
+    <div class="kv"><span>Situação</span><span id="s-update-text"></span></div>
+    <div class="sheet-actions">
+      ${s.updatePending ? `<button class="sheet-btn primary" id="s-install">${icon('download')}Instalar atualização baixada</button>` : ''}
       <button class="sheet-btn primary" id="s-update">${icon('download')}Procurar atualização</button>
+    </div>
+
+    <h4>Segurança e ajuda</h4>
+    <div class="sheet-actions">
+      <button class="sheet-btn" id="s-pin">${icon('lock')}${s.requirePin ? 'Parar de pedir PIN' : 'Pedir PIN para novos celulares'}</button>
+      <button class="sheet-btn" id="s-diag">${icon('search')}Diagnóstico</button>
       <button class="sheet-btn danger" id="s-logout">${icon('logout')}Desconectar este celular</button>
     </div>
     <p class="hint small" style="margin-top:16px">${icon('info')}Legenda automática: modelo Kroko ASR (Banafo, licença CC-BY-SA) rodando com sherpa-onnx (Apache-2.0).</p>`);
   sheet.querySelector('#s-update-text').textContent = s.update || '–';
-  sheet.querySelector('#s-device').textContent = s.device || '–';
-  const air = sheet.querySelector('#s-air');
-  if (air) {
-    air.textContent = `celular enviou ${native.airMouseSent?.() ?? 0} · TV recebeu ${s.airReceived ?? '?'}` +
-      (s.airRejected ? ` · recusados ${s.airRejected}` : '') + (s.pointerProblem ? ` · ${s.pointerProblem}` : '');
-  }
-  const lastPlay = sheet.querySelector('#s-last-play');
-  if (lastPlay) lastPlay.textContent = s.lastPlay;
-  const lastFields = sheet.querySelector('#s-last-fields');
-  if (lastFields) lastFields.textContent = s.lastFields;
-  const adbError = sheet.querySelector('#s-adb-error');
-  if (adbError) adbError.textContent = s.adbError;
   sheetButton(sheet, 's-retry', async () => {
     toast('Tentando conectar…');
     try {
@@ -909,24 +885,9 @@ function settingsSheet() {
       setTimeout(async () => { await refreshStatus(); settingsSheet(); }, 4000);
     } catch (e) { toast(e.message, true); }
   });
-  sheetButton(sheet, 's-probe', probeSheet);
   sheetButton(sheet, 's-player', playerSheet);
   sheetButton(sheet, 's-saver', screensaverSheet);
-  sheetButton(sheet, 's-system', async () => {
-    const report = openSheet(`
-      <div class="sheet-head"><div><h3>Configurações e entradas da TV</h3><p>Mande um print disto se algum atalho não abrir</p></div></div>
-      <pre class="report" id="s-system-report">Lendo…</pre>
-      <div class="sheet-actions"><button class="sheet-btn" id="s-system-close">${icon('x')}Fechar</button></div>`);
-    sheetButton(report, 's-system-close', settingsSheet);
-    try {
-      const r = await api('/api/debug/system');
-      report.querySelector('#s-system-report').textContent =
-        `App de configurações: ${r.settingsPackage || 'nenhum'}\n\nAtalhos padrão:\n${r.standard.join('\n')}\n\n` +
-        `Entradas (${r.inputs.length}):\n${r.inputs.join('\n') || 'nenhuma'}\n\nTelas do app de configurações (${r.screens.length}):\n${r.screens.join('\n')}`;
-    } catch (e) { report.querySelector('#s-system-report').textContent = e.message; }
-  });
-  sheetButton(sheet, 's-cec', cecSheet);
-  sheetButton(sheet, 's-other-device', deviceSheet);
+  sheetButton(sheet, 's-diag', diagnosticsSheet);
   const nameValue = sheet.querySelector('#s-name-value');
   if (nameValue) nameValue.textContent = s.homeName || '–';
   sheetButton(sheet, 's-name', () => {
@@ -950,7 +911,6 @@ function settingsSheet() {
       } catch (e) { toast(e.message, true); }
     });
   });
-  sheetButton(sheet, 's-update-tv', () => { closeSheet(); native.updateTv(); });
   sheetButton(sheet, 's-home', async () => {
     const enable = !s.homeLauncher;
     toast(enable ? 'Ativando…' : 'Desativando…');
@@ -986,12 +946,58 @@ function settingsSheet() {
     try {
       const { result } = await api('/api/update', {});
       toast(result);
+      // The phone also installs the newest TV app itself (no OK needed on the TV)
+      native?.updateTv?.();
       sheet.querySelector('#s-update-text').textContent = result;
       if (/Telas atualizadas/.test(result)) setTimeout(() => location.reload(), 1200);
     } catch (e) { toast(e.message, true); }
   });
   sheetButton(sheet, 's-logout', () => { closeSheet(); logout(); });
 }
+/** Connection details and the tests used to fix problems, out of the way of everyday settings. */
+function diagnosticsSheet() {
+  const s = state.status || {};
+  const sheet = openSheet(`
+    <div class="sheet-head"><div><h3>Diagnóstico</h3><p>Para resolver problemas</p></div></div>
+    <div class="kv"><span>Aparelho</span><span id="d-device"></span></div>
+    ${s.via ? `<div class="kv"><span>Controle via</span><span>${s.via}</span></div>` : ''}
+    ${s.adbError ? `<div class="kv"><span>Erro do ADB</span><span class="mono" id="d-adb-error"></span></div>` : ''}
+    ${native ? `<div class="kv"><span>Mouse aéreo</span><span class="mono" id="d-air"></span></div>` : ''}
+    ${s.lastPlay ? `<div class="kv"><span>Último vídeo</span><span class="mono" id="d-last-play"></span></div>` : ''}
+    ${s.lastFields ? `<div class="kv"><span>Campos do app</span><span class="mono" id="d-last-fields"></span></div>` : ''}
+    <div class="sheet-actions" style="margin-top:12px">
+      <button class="sheet-btn" id="d-probe">${icon('search')}Teste da conexão (ADB)</button>
+      <button class="sheet-btn" id="d-system">${icon('settings')}Telas de configuração e entradas</button>
+      <button class="sheet-btn" id="d-cec">${icon('power')}Teste do HDMI-CEC</button>
+      <button class="sheet-btn" id="d-back">${icon('back')}Voltar aos ajustes</button>
+    </div>`);
+  sheet.querySelector('#d-device').textContent = s.device || '–';
+  const set = (id, value) => { const el = sheet.querySelector(id); if (el) el.textContent = value; };
+  set('#d-adb-error', s.adbError);
+  set('#d-last-play', s.lastPlay);
+  set('#d-last-fields', s.lastFields);
+  if (native) {
+    set('#d-air', `celular enviou ${native.airMouseSent?.() ?? 0} · TV recebeu ${s.airReceived ?? '?'}` +
+      (s.airRejected ? ` · recusados ${s.airRejected}` : '') + (s.pointerProblem ? ` · ${s.pointerProblem}` : ''));
+  }
+  sheetButton(sheet, 'd-probe', probeSheet);
+  sheetButton(sheet, 'd-cec', cecSheet);
+  sheetButton(sheet, 'd-back', settingsSheet);
+  sheetButton(sheet, 'd-system', async () => {
+    const report = openSheet(`
+      <div class="sheet-head"><div><h3>Configurações e entradas</h3><p>Mande um print disto se algum atalho não abrir</p></div></div>
+      <pre class="report" id="s-system-report">Lendo…</pre>
+      <div class="sheet-actions"><button class="sheet-btn" id="s-system-close">${icon('x')}Fechar</button></div>`);
+    sheetButton(report, 's-system-close', diagnosticsSheet);
+    try {
+      const r = await api('/api/debug/system');
+      report.querySelector('#s-system-report').textContent =
+        `App de configurações: ${r.settingsPackage || 'nenhum'}\n\nAtalhos padrão:\n${r.standard.join('\n')}\n\n` +
+        `Entradas (${r.inputs.length}):\n${r.inputs.join('\n') || 'nenhuma'}\n\nTelas do app de configurações (${r.screens.length}):\n${r.screens.join('\n')}`;
+    } catch (e) { report.querySelector('#s-system-report').textContent = e.message; }
+  });
+}
+
 // ---------- Screensaver ----------
 
 const SAVER_MINUTES = [1, 2, 5, 10];
@@ -1704,6 +1710,7 @@ async function loadMovies() {
   ]);
   body.append(shelf('Filmes populares', movies.metas.slice(0, 20).map((m) => posterCard(m))));
   body.append(shelf('Séries populares', series.metas.slice(0, 20).map((m) => posterCard(m))));
+  if (kind === 'projetor') loadGenreShelves(body);
 }
 
 async function searchMovies(query) {
@@ -1906,6 +1913,26 @@ function hintText(text) {
 $('yt-channels').addEventListener('click', channelsSheet);
 $('yt-search').addEventListener('search', () => loadYouTube());
 $('yt-search').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); $('yt-search').blur(); loadYouTube(); } });
+
+const PROJECTOR_GENRES = [['Ação', 'Action'], ['Aventura', 'Adventure'], ['Comédia', 'Comedy'], ['Drama', 'Drama'],
+  ['Ficção científica', 'Sci-Fi'], ['Suspense', 'Thriller'], ['Terror', 'Horror'], ['Romance', 'Romance'],
+  ['Animação', 'Animation'], ['Família', 'Family'], ['Fantasia', 'Fantasy'], ['Crime', 'Crime'],
+  ['Mistério', 'Mystery'], ['Documentário', 'Documentary'], ['Guerra', 'War'], ['Faroeste', 'Western']];
+
+/** One row per genre, films and series mixed, added one after another as they arrive. */
+async function loadGenreShelves(body) {
+  for (const [title, genre] of PROJECTOR_GENRES) {
+    if (state.tab !== 'movies' || $('movies-search').value.trim()) return;
+    const get = (type) => api(`/api/stremio/genre?type=${type}&genre=${encodeURIComponent(genre)}`).then((r) => r.metas).catch(() => []);
+    const [movies, series] = await Promise.all([get('movie'), get('series')]);
+    const mixed = [];
+    for (let i = 0; i < Math.max(movies.length, series.length) && mixed.length < 20; i++) {
+      if (movies[i]) mixed.push(movies[i]);
+      if (series[i]) mixed.push(series[i]);
+    }
+    if (mixed.length) body.append(shelf(title, mixed.map((m) => posterCard(m))));
+  }
+}
 
 function shelf(title, cards) {
   const wrap = document.createElement('section');
