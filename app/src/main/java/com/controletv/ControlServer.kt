@@ -263,6 +263,34 @@ class ControlServer(
                 ok(JSONObject().put("metas", Stremio.catalog(type, session.parameters["q"]?.firstOrNull())))
             }
 
+            // YouTube without ads: channels picked on the phone, videos opened in SmartTube
+            path == "/api/youtube" -> ok(YouTube.status(context))
+
+            path == "/api/youtube/channels" ->
+                ok(JSONObject().put("channels", YouTube.searchChannels(session.parameters["q"]?.firstOrNull().orEmpty())))
+
+            path == "/api/youtube/search" ->
+                ok(JSONObject().put("videos", JSONArray(YouTube.searchVideos(session.parameters["q"]?.firstOrNull().orEmpty()).map { it.toJson() })))
+
+            path == "/api/youtube/videos" ->
+                ok(JSONObject().put("videos", JSONArray(YouTube.channelVideos(session.parameters["channel"]?.firstOrNull().orEmpty()).map { it.toJson() })))
+
+            path == "/api/youtube/channel" && post -> {
+                val body = body(session)
+                YouTube.addChannel(context, body.getString("id"), body.optString("name", "Canal"), body.optString("thumb").ifEmpty { null })
+                ok(YouTube.status(context))
+            }
+
+            path == "/api/youtube/channel/remove" && post -> {
+                YouTube.removeChannel(context, body(session).getString("id"))
+                ok(YouTube.status(context))
+            }
+
+            path == "/api/youtube/open" && post -> {
+                YouTube.open(context, body(session).getString("id"))
+                ok()
+            }
+
             path == "/api/stremio/meta" -> {
                 val type = session.parameters["type"]?.firstOrNull() ?: "movie"
                 ok(JSONObject().put("meta", Stremio.meta(type, session.parameters["id"]?.firstOrNull().orEmpty())))

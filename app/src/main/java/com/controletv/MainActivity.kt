@@ -145,6 +145,11 @@ class MainActivity : Activity() {
     private var genreRows: List<Pair<String, List<JSONObject>>> = emptyList()
     private var stremioFetchedAt = 0L
     private var stremioVersion = 0
+    // YouTube: newest videos of each channel picked on the phone
+    private var ytRows: List<Pair<String, List<JSONObject>>> = emptyList()
+    private var ytFetchedAt = 0L
+    private var ytChanges = -1
+    private var ytLoading = false
     private var shownUrl: String? = null
     private var lastMinute = -1
     private var shownChanges = -1
@@ -612,6 +617,7 @@ class MainActivity : Activity() {
     private fun heroForTab() {
         val about = when (tab) {
             "media" -> "Filmes e séries do seu Stremio"
+            "youtube" -> if (ytRows.isEmpty()) "Escolha seus canais pelo celular, na aba YouTube" else "${ytRows.size} canais   ·   abre no SmartTube, sem anúncios"
             "apps" -> "${data?.apps?.size ?: 0} apps na TV"
             "settings" -> "Telas da Fire TV, entradas e tela inicial"
             else -> restSummary()
@@ -630,6 +636,7 @@ class MainActivity : Activity() {
 
     /** Shows a film or series: details at once, missing ones (synopsis, rating) fetched, backdrop after a short pause. */
     private fun heroFor(item: JSONObject, extra: String?) {
+        if (item.optBoolean("yt")) return heroForVideo(item)
         val id = item.optString("id")
         heroKey = id
         applyHero(merge(item, metaCache[id]), extra)
@@ -646,6 +653,29 @@ class MainActivity : Activity() {
                 }
             }
         }.also { handler.postDelayed(it, 260) }
+    }
+
+    /** A YouTube video: title, channel · when · views · length, description, its picture behind. */
+    private fun heroForVideo(video: JSONObject) {
+        val id = video.optString("id")
+        heroKey = "yt:$id"
+        heroPending?.let { handler.removeCallbacks(it) }
+        heroLogo.visibility = View.GONE
+        heroTitle.visibility = View.VISIBLE
+        heroTitle.text = video.optString("name")
+        heroImdb.visibility = View.GONE
+        heroMeta.text = listOf("channel", "when", "views", "length").map { video.optString(it) }
+            .filter { it.isNotEmpty() && it != "null" }.joinToString("   ·   ")
+        heroAwards.visibility = View.GONE
+        // The first paragraph is what the video is about; the rest is usually links
+        val about = video.optString("description").split(Regex("\\n\\s*\\n")).firstOrNull().orEmpty().take(420)
+        heroDesc.textSize = px(1.2f)
+        heroDesc.text = about
+        heroCredits.text = ""
+        heroHint.text = if (YouTube.smartTube(this) != null) "OK abre no SmartTube, sem anúncios" else "Instale o SmartTube na TV para ver sem anúncios"
+        heroHint.visibility = View.VISIBLE
+        heroPending = Runnable { if (heroKey == "yt:$id") setBackdrop(video.optString("backdrop"), video.optString("thumb")) }
+            .also { handler.postDelayed(it, 260) }
     }
 
     /** Shows an app, a shortcut or anything without a backdrop. */
@@ -748,7 +778,7 @@ class MainActivity : Activity() {
     }
 
     /** Crossfades the backdrop to a new picture (null = back to the plain neon background). */
-    private fun setBackdrop(url: String?) {
+    private fun setBackdrop(url: String?, fallback: String? = null) {
         if (url == backdropUrl) return
         backdropUrl = url
         if (url == null) {
@@ -758,7 +788,12 @@ class MainActivity : Activity() {
         }
         val incoming = backBack
         RemoteImages.load(url, incoming, resources.displayMetrics.widthPixels / 2) { ok ->
-            if (!ok || backdropUrl != url) return@load
+            if (backdropUrl != url) return@load
+            if (!ok) {
+                // e.g. YouTube has no full-size picture for some videos
+                if (fallback != null) { backdropUrl = null; setBackdrop(fallback) }
+                return@load
+            }
             backBack = backFront
             backFront = incoming
             incoming.bringToFront()
@@ -787,7 +822,7 @@ class MainActivity : Activity() {
             val rowOrder = HomePrefs.rowOrder(this)
             val sorted = rowOrder.associateWith { id -> HomePrefs.sortFolder(this, id, apps.filter { folders[it.pkg] == id }) }
             val photos = ScreenSaver.photos()
-            val signature = "s$stremioVersion|" + WatchHistory.list(this).joinToString { it.id + it.position / 60_000 } + WatchNext.entries().size +
+            val signature = "s$stremioVersion|y${ytRows.hashCode()}|" + WatchHistory.list(this).joinToString { it.id + it.position / 60_000 } + WatchNext.entries().size +
                 rowOrder.joinToString { id -> id + ":" + sorted[id]!!.joinToString(",") { it.pkg } } + "|" + favorites.joinToString() +
                 "|" + photos.joinToString { it.name }
             runOnUiThread {
@@ -809,6 +844,7 @@ class MainActivity : Activity() {
         rows.removeAllViews()
         when (tab) {
             "media" -> mediaRows()
+            "youtube" -> youtubeRows()
             "apps" -> appRows(d)
             "settings" -> settingsRows()
             else -> restRows(d)
@@ -835,6 +871,53 @@ class MainActivity : Activity() {
         val watchNext = WatchNext.entries()
         if (history.isNotEmpty() || watchNext.isNotEmpty()) {
             rows.addView(row("Continuar no Tocar na TV", history.map { historyCard(it) } + watchNext.map { watchNextCard(it) }))
+        }
+    }
+
+    private fun youtubeRows() {
+        if (ytRows.isEmpty()) {
+            val w = u(21f)
+            val message = if (ytLoading) "Carregando os vídeos…" else "Escolha seus canais pelo celular:\naba YouTube → Canais"
+            rows.addView(row("YouTube", listOf(mediaTile(
+                key = "yt:hint", item = null, extra = null, imageUrl = null, fallbackUrl = null,
+                width = w, height = w * 9 / 16, overlay = message, progress = null,
+                textTitle = "YouTube sem anúncios", textInfo = message.replace("\n", " "),
+            ) { YouTube.smartTube(this)?.let { Apps.launch(this, it) } ?: toast("Instale o SmartTube na TV") })))
+            return
+        }
+        ytRows.forEach { (channel, videos) -> rows.addView(row(channel, videos.map { videoTile(it) })) }
+    }
+
+    /** 16:9 video picture with its title; OK opens it in SmartTube. */
+    private fun videoTile(video: JSONObject): View {
+        val w = u(21f)
+        return mediaTile(
+            key = "yt:${video.optString("id")}", item = video, extra = null,
+            imageUrl = video.optString("thumb"), fallbackUrl = video.optString("thumbSmall"),
+            width = w, height = w * 9 / 16, overlay = video.optString("name"), progress = null,
+        ) {
+            runCatching { YouTube.open(this, video.optString("id")) }.onFailure { toast(it.message ?: "Não abriu") }
+        }
+    }
+
+    /** Newest videos of each picked channel: every 15 minutes, or right away when the list changes. */
+    private fun refreshYouTube() {
+        val changed = YouTube.changes != ytChanges
+        if (!changed && System.currentTimeMillis() - ytFetchedAt < 15 * 60_000) return
+        if (ytLoading) return
+        ytChanges = YouTube.changes
+        ytFetchedAt = System.currentTimeMillis()
+        ytLoading = true
+        loader.execute {
+            val loaded = YouTube.channels(this).mapNotNull { channel ->
+                val videos = runCatching { YouTube.channelVideos(channel.optString("id")) }.getOrNull() ?: return@mapNotNull null
+                channel.optString("name") to videos.take(MAX_PER_ROW).map { it.toJson() }
+            }
+            runOnUiThread {
+                ytLoading = false
+                ytRows = loaded
+                loadApps(force = false)
+            }
         }
     }
 
@@ -1636,6 +1719,7 @@ class MainActivity : Activity() {
         updateMusic()
         if (Adb.state == Adb.State.OK) loader.execute { WatchNext.refresh() }
         refreshStremio()
+        refreshYouTube()
 
         // The layout may have been changed from the phone
         if (HomePrefs.changes != shownChanges) {
@@ -1710,6 +1794,7 @@ class MainActivity : Activity() {
         private const val MAX_PER_ROW = 12
         private val TABS = listOf(
             Triple("media", "Filmes e séries", R.drawable.ic_tab_film),
+            Triple("youtube", "YouTube", R.drawable.ic_tab_youtube),
             Triple("apps", "Apps", R.drawable.ic_t_apps),
             Triple("settings", "Configurações", R.drawable.ic_t_settings),
             Triple("rest", "Descanso", R.drawable.ic_tab_moon),
