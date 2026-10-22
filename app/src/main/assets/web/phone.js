@@ -344,7 +344,7 @@ function showTab(tab) {
   if (state.tab === 'keyboard' && tab !== 'keyboard') setKeyboard(false);
   if (tab !== 'remote') setAirMode('off');
   state.tab = tab;
-  for (const name of ['home', 'remote', 'apps', 'movies', 'youtube', 'keyboard']) {
+  for (const name of ['home', 'remote', 'apps', 'movies', 'week', 'youtube', 'keyboard']) {
     $(`view-${name}`).hidden = name !== tab;
   }
   document.querySelectorAll('.tabbar button').forEach((b) => b.classList.toggle('on', b.dataset.tab === tab));
@@ -352,6 +352,7 @@ function showTab(tab) {
   if (tab === 'apps') loadApps();
   if (tab === 'movies') loadMovies();
   if (tab === 'youtube') loadYouTube();
+  if (tab === 'week') loadWeek();
   if (tab === 'home' && kind === 'projetor') loadProjector();
   if (tab === 'keyboard') {
     setKeyboard(true);
@@ -2094,6 +2095,91 @@ async function personSheet(c) {
       : [hintText('A lista de filmes não respondeu agora. Tente de novo em alguns minutos.')]));
   } catch (e) { sheet.querySelector('#p-bio').textContent = e.message; }
 }
+
+// ---------- Semana: weekly picks from a free AI (Gemini), based on the user's own words ----------
+
+let weekPoll = null;
+
+async function loadWeek() {
+  clearTimeout(weekPoll);
+  const body = $('week-body');
+  let ai;
+  try { ai = await api('/api/ai'); } catch (e) { body.replaceChildren(hintText(e.message)); return; }
+  if (!ai.hasKey || !ai.taste) {
+    const card = noteCard('sparkles', 'Sugestões da IA toda semana',
+      'Conte do que você gosta e cole uma chave gratuita do Gemini (Google). Toda segunda chegam 10 filmes e séries fora do óbvio, com o porquê.');
+    const go = document.createElement('button');
+    go.className = 'pill glow';
+    go.innerHTML = `${icon('sparkles')}Começar`;
+    go.onclick = () => tasteSheet(ai);
+    card.querySelector('div').append(go);
+    body.replaceChildren(card);
+    return;
+  }
+  const when = ai.generatedAt ? new Date(ai.generatedAt).toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' }) : null;
+  $('week-sub').textContent = when ? `Escolhidos pela IA em ${when}` : 'Sugestões da IA para o seu gosto';
+  const top = document.createElement('div');
+  top.className = 'sheet-actions';
+  const again = document.createElement('button');
+  again.className = 'sheet-btn';
+  again.innerHTML = `${icon('refresh')}${ai.generating ? 'Gerando… (até 1 minuto)' : 'Gerar de novo'}`;
+  again.disabled = ai.generating;
+  again.onclick = async () => {
+    try { await api('/api/ai/generate', {}); toast('Pedindo novas sugestões à IA…'); loadWeek(); } catch (e) { toast(e.message, true); }
+  };
+  top.append(again);
+  const parts = [top];
+  if (ai.error && !ai.generating) parts.push(noteCard('info', 'A última tentativa falhou', ai.error));
+  if (!ai.items.length && !ai.generating && !ai.error) parts.push(hintText('Ainda sem sugestões: toque em Gerar de novo.'));
+  parts.push(...ai.items.map(weekCard));
+  body.replaceChildren(...parts);
+  // Follow the generation until it's done
+  if (ai.generating && state.tab === 'week') weekPoll = setTimeout(loadWeek, 4000);
+}
+
+function weekCard(t) {
+  const card = gemCard(t);
+  card.querySelector('.why').textContent = [t.type === 'series' ? 'Série' : 'Filme', t.releaseInfo, t.imdbRating && `IMDb ${t.imdbRating}`].filter(Boolean).join(' · ');
+  card.querySelector('p').textContent = t.why || '';
+  return card;
+}
+
+/** The user's taste in their own words, and the free Gemini key. */
+function tasteSheet(ai) {
+  const sheet = openSheet(`
+    <div class="sheet-head"><div><h3>Meu gosto</h3><p>A IA usa isto toda semana para escolher</p></div></div>
+    <h4>Do que você gosta (e do que não gosta)</h4>
+    <textarea id="ai-taste" rows="6" placeholder="Ex.: Amo suspense psicológico e filmes coreanos, ficção científica que faz pensar, séries curtas. Gosto de Parasita, Dark e Ex Machina. Odeio comédia romântica boba e filmes de super-herói."></textarea>
+    <h4>Chave gratuita do Gemini</h4>
+    <p class="body">1. Abra <b>aistudio.google.com/apikey</b> e entre com sua conta Google.<br>2. Toque em <b>Criar chave de API</b> e copie.<br>3. Cole aqui. Ela fica guardada só na TV.</p>
+    <input class="name-input" id="ai-key" autocomplete="off" placeholder="${ai.hasKey ? 'Chave já salva (cole outra para trocar)' : 'Cole a chave aqui'}">
+    ${native?.openUri ? `<button class="sheet-btn" id="ai-open">${icon('download')}Abrir o site da chave</button>` : ''}
+    <p class="hint small">${icon('info')}Na faixa grátis, o Google pode usar o seu gosto e a lista do que você viu para melhorar a IA dele.</p>
+    <div class="sheet-actions">
+      <button class="sheet-btn primary" id="ai-save">${icon('sparkles')}Salvar e gerar sugestões</button>
+      <button class="sheet-btn" id="ai-cancel">${icon('x')}Cancelar</button>
+    </div>`);
+  sheet.querySelector('#ai-taste').value = ai.taste || '';
+  sheetButton(sheet, 'ai-cancel', closeSheet);
+  sheetButton(sheet, 'ai-open', () => native.openUri('https://aistudio.google.com/apikey'));
+  sheetButton(sheet, 'ai-save', async () => {
+    const taste = sheet.querySelector('#ai-taste').value.trim();
+    const key = sheet.querySelector('#ai-key').value.trim();
+    if (!taste) { toast('Escreva do que você gosta', true); return; }
+    if (!key && !ai.hasKey) { toast('Cole a chave do Gemini', true); return; }
+    try {
+      await api('/api/ai/settings', { taste, key });
+      await api('/api/ai/generate', {});
+      toast('Pedindo sugestões à IA…');
+      closeSheet();
+      loadWeek();
+    } catch (e) { toast(e.message, true); }
+  });
+}
+
+$('week-edit').addEventListener('click', async () => {
+  try { tasteSheet(await api('/api/ai')); } catch (e) { toast(e.message, true); }
+});
 
 function shelf(title, cards) {
   const wrap = document.createElement('section');

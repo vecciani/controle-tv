@@ -282,6 +282,22 @@ class ControlServer(
                 ok()
             }
 
+            // "Sugestões da semana": the free AI's weekly picks for the user's taste
+            path == "/api/ai" -> ok(AiWeekly.status(context))
+
+            path == "/api/ai/settings" && post -> {
+                val body = body(session)
+                AiWeekly.configure(context, body.optString("key").ifEmpty { null }, if (body.has("taste")) body.getString("taste") else null)
+                ok(AiWeekly.status(context))
+            }
+
+            path == "/api/ai/generate" && post -> {
+                // Takes up to a minute: answers right away, the phone follows "generating"
+                if (!AiWeekly.generating) Thread { runCatching { AiWeekly.generate(context) } }.start()
+                Thread.sleep(300)
+                ok(AiWeekly.status(context))
+            }
+
             // "Não sei o que ver": hidden gems for a mood, time, company and place
             path == "/api/discover" -> {
                 fun p(name: String, default: String) = session.parameters[name]?.firstOrNull()?.ifEmpty { null } ?: default

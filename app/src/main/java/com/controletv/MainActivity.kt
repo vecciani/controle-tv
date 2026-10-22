@@ -153,6 +153,7 @@ class MainActivity : Activity() {
     private var shownUrl: String? = null
     private var lastMinute = -1
     private var shownChanges = -1
+    private var shownAiVersion = 0
 
     private val unit by lazy { resources.displayMetrics.widthPixels / 100f } // 1% of screen width
     /** Projector mode: no music or YouTube; brightness, Bluetooth and many more film rows instead. */
@@ -635,6 +636,7 @@ class MainActivity : Activity() {
     private fun heroForTab() {
         val about = when (tab) {
             "media" -> "Filmes e séries do seu Stremio"
+            "week" -> if (data?.aiItems.isNullOrEmpty()) "Conte seu gosto pelo celular, na aba Semana" else "Sugestões da IA para o seu gosto, renovadas toda segunda"
             "youtube" -> if (ytRows.isEmpty()) "Escolha seus canais pelo celular, na aba YouTube" else "${ytRows.size} canais   ·   abre no SmartTube, sem anúncios"
             "apps" -> "${data?.apps?.size ?: 0} apps na TV"
             "settings" -> "Telas da Fire TV, entradas e tela inicial"
@@ -829,6 +831,7 @@ class MainActivity : Activity() {
         val rowOrder: List<String>,
         val sorted: Map<String, List<AppInfo>>,
         val photos: List<java.io.File>,
+        val aiItems: List<JSONObject>,
     )
 
     private fun loadApps(force: Boolean) {
@@ -840,13 +843,14 @@ class MainActivity : Activity() {
             val rowOrder = HomePrefs.rowOrder(this)
             val sorted = rowOrder.associateWith { id -> HomePrefs.sortFolder(this, id, apps.filter { folders[it.pkg] == id }) }
             val photos = ScreenSaver.photos()
+            val aiItems = AiWeekly.items(this)
             val signature = "s$stremioVersion|y${ytRows.hashCode()}|" + WatchHistory.list(this).joinToString { it.id + it.position / 60_000 } + WatchNext.entries().size +
                 rowOrder.joinToString { id -> id + ":" + sorted[id]!!.joinToString(",") { it.pkg } } + "|" + favorites.joinToString() +
-                "|" + photos.joinToString { it.name }
+                "|" + photos.joinToString { it.name } + "|" + aiItems.joinToString { it.optString("id") }
             runOnUiThread {
                 if (!force && signature == shownSignature) return@runOnUiThread
                 shownSignature = signature
-                data = HomeData(apps, favorites, rowOrder, sorted, photos)
+                data = HomeData(apps, favorites, rowOrder, sorted, photos, aiItems)
                 fillRows()
             }
         }
@@ -862,6 +866,7 @@ class MainActivity : Activity() {
         rows.removeAllViews()
         when (tab) {
             "media" -> mediaRows()
+            "week" -> weekRows(d)
             "youtube" -> youtubeRows()
             "apps" -> appRows(d)
             "settings" -> settingsRows()
@@ -893,6 +898,24 @@ class MainActivity : Activity() {
         if (history.isNotEmpty() || watchNext.isNotEmpty()) {
             rows.addView(row("Continuar no Tocar na TV", history.map { historyCard(it) } + watchNext.map { watchNextCard(it) }))
         }
+    }
+
+    /** The AI's picks for this week: films and series, each with why it fits in the hero. */
+    private fun weekRows(d: HomeData) {
+        if (d.aiItems.isEmpty()) {
+            val w = u(21f)
+            val message = "Sugestões da IA toda semana:\nno celular, aba Semana → conte seu gosto"
+            rows.addView(row("Sugestões da semana", listOf(mediaTile(
+                key = "week:hint", item = null, extra = null, imageUrl = null, fallbackUrl = null,
+                width = w, height = w * 9 / 16, overlay = message, progress = null,
+                textTitle = "Sugestões da semana", textInfo = message.replace("\n", " "),
+            ) { toast("Abra o app do celular, aba Semana") })))
+            return
+        }
+        val movies = d.aiItems.filter { it.optString("type") != "series" }
+        val series = d.aiItems.filter { it.optString("type") == "series" }
+        if (movies.isNotEmpty()) rows.addView(row("Filmes da semana, escolhidos pela IA", movies.map { stremioPoster(it) }))
+        if (series.isNotEmpty()) rows.addView(row("Séries da semana", series.map { stremioPoster(it) }))
     }
 
     private fun youtubeRows() {
@@ -1826,8 +1849,9 @@ class MainActivity : Activity() {
         refreshYouTube()
 
         // The layout may have been changed from the phone
-        if (HomePrefs.changes != shownChanges) {
+        if (HomePrefs.changes != shownChanges || AiWeekly.version != shownAiVersion) {
             shownChanges = HomePrefs.changes
+            shownAiVersion = AiWeekly.version
             loadApps(force = false)
         }
     }
@@ -1898,6 +1922,7 @@ class MainActivity : Activity() {
         private const val MAX_PER_ROW = 12
         private val TABS = listOf(
             Triple("media", "Filmes e séries", R.drawable.ic_tab_film),
+            Triple("week", "Semana", R.drawable.ic_tab_sparkles),
             Triple("youtube", "YouTube", R.drawable.ic_tab_youtube),
             Triple("apps", "Apps", R.drawable.ic_t_apps),
             Triple("settings", "Configurações", R.drawable.ic_t_settings),

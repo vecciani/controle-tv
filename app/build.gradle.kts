@@ -55,4 +55,6 @@ dependencies {
     // Speech recognition for automatic subtitles (downloaded by scripts/baixar-libs.sh)
     implementation(files("libs/sherpa-onnx-1.13.8.aar"))
     testImplementation("junit:junit:4.13.2")
+    // The real org.json in unit tests (Android's is only a stub there)
+    testImplementation("org.json:json:20240303")
 }

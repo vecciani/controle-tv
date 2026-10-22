@@ -53,7 +53,7 @@ main { padding: 4px 16px calc(96px + env(safe-area-inset-bottom)); }
 
 .tabbar {
   position: fixed; left: 12px; right: 12px; bottom: calc(12px + env(safe-area-inset-bottom)); z-index: 6;
-  display: grid; grid-template-columns: repeat(5, 1fr); padding: 6px; border-radius: 22px;
+  display: flex; padding: 6px; border-radius: 22px;
   background: rgba(18, 18, 29, .86); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
   border: 1px solid var(--line); box-shadow: 0 12px 40px rgba(0, 0, 0, .5);
 }
@@ -61,6 +61,9 @@ main { padding: 4px 16px calc(96px + env(safe-area-inset-bottom)); }
   display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 8px 0; border-radius: 16px;
   font-size: 11px; color: var(--muted); transition: color .15s, background .15s;
 }
+.tabbar button { flex: 1; min-width: 0; }
+/* Tabs that don't apply (YouTube on the projector) really disappear */
+.tabbar button[hidden] { display: none; }
 .tabbar button.on { color: var(--cyan); background: rgba(34, 211, 238, .08); }
 .tabbar button.on svg { filter: drop-shadow(0 0 6px rgba(34, 211, 238, .8)); }
 
@@ -481,6 +484,11 @@ input, textarea, .report { -webkit-user-select: text; user-select: text; -webkit
 .cast-photo.big { width: 96px; height: 96px; font-size: 24px; }
 .person-head { display: flex; align-items: center; gap: 14px; margin-bottom: 10px; }
 .person-head h3 { margin: 0; font-size: 20px; }
+
+/* Semana (AI) */
+#ai-taste { width: 100%; box-sizing: border-box; padding: 12px; border-radius: 14px; background: var(--surface); border: 1px solid var(--line);
+  color: var(--text); font: inherit; font-size: 14px; resize: vertical; }
+#week-body { display: flex; flex-direction: column; gap: 12px; }
 
 /* Não sei o que ver */
 .discover-card { width: 100%; display: flex; align-items: center; gap: 12px; padding: 16px; margin: 0 0 18px; border-radius: 18px; text-align: left;

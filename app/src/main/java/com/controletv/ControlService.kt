@@ -49,9 +49,12 @@ class ControlService : Service() {
             var askedPhotos = false
             var askedAudio = false
             var askedHome = false
+            var loops = 0
             while (true) {
                 Thread.sleep(10_000)
                 try {
+                    // Once a minute: this week's AI suggestions, if they're due (in its own thread: it takes a while)
+                    if (loops++ % 6 == 0 && !AiWeekly.generating) Thread { AiWeekly.tick(this) }.start()
                     // Projector / TV box: make ours the default home screen once ADB is there
                     if (!askedHome && Adb.state == Adb.State.OK) { askedHome = true; HomeWatcher.ensureRealHome(this, withAdb = true) }
                     if (ScreenSaver.enabled(this) && Adb.state == Adb.State.OK) {
