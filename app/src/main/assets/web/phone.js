@@ -718,6 +718,15 @@ async function cecSheet() {
   } catch (e) { out.textContent = e.message; }
 }
 
+// ---------- TV or projector: switching goes back to the phone app's start screen ----------
+
+function devicesSheet() {
+  if (native?.chooseDevice) native.chooseDevice();
+  else toast('Use o app Controle TV do celular para trocar de aparelho', true);
+}
+
+$('device-switch').addEventListener('click', devicesSheet);
+
 function sheetButton(sheet, id, handler) {
   sheet.querySelector(`#${id}`)?.addEventListener('click', handler);
 }
