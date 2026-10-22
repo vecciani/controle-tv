@@ -58,6 +58,12 @@
         </activity-alias>
 
         <activity
+            android:name=".PhotoShowActivity"
+            android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenSize"
+            android:exported="false"
+            android:launchMode="singleTask" />
+
+        <activity
             android:name=".ScreenSaverActivity"
             android:excludeFromRecents="true"
             android:exported="false"

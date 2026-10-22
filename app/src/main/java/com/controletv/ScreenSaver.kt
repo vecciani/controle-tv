@@ -66,7 +66,7 @@ object ScreenSaver {
 
     /** Films, live TV and our own player never get interrupted by the screensaver. */
     private fun watchingVideo(context: Context): Boolean {
-        if (PlayerActivity.state() != null) return true
+        if (PlayerActivity.state() != null || PhotoShowActivity.visible) return true
         val pkg = foreground ?: return false
         if (pkg == context.packageName) return false
         return Folders.folderOf(context, pkg, Apps.label(context, pkg)) in setOf("filmes", "canais")

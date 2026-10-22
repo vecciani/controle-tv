@@ -15,7 +15,8 @@ import java.net.URL
 /**
  * "Tocar na TV": shows up when a video app offers "open with external player" or "share".
  * Takes the video link (plus headers, title and subtitles the app passes along, using the
- * same extras as MX Player and VLC) and sends it to the TV's player.
+ * same extras as MX Player and VLC) and sends it to the TV's player. Photos and videos stored
+ * on the phone (gallery → Compartilhar) are served to the TV straight from the phone.
  */
 class CastActivity : Activity() {
 
@@ -26,16 +27,17 @@ class CastActivity : Activity() {
         val token = prefs.getString("token", null)
         if (host == null || token == null) return done("Abra o Controle TV e conecte à TV primeiro")
 
-        val request = try {
-            build(intent)
-        } catch (e: IllegalArgumentException) {
-            return done(e.message ?: "Link não suportado")
-        } ?: return done("Não encontrei um link de vídeo")
-
         Thread {
             val message = try {
+                val request = build(intent, host) ?: throw IllegalArgumentException("Não encontrei um link de vídeo")
                 post(host, token, request.first, request.second)
-                if (request.first == "/api/play") "Tocando na TV" else "Abrindo na TV"
+                when (request.first) {
+                    "/api/play" -> "Tocando na TV"
+                    "/api/photos" -> "Mostrando as fotos na TV"
+                    else -> "Abrindo na TV"
+                }
+            } catch (e: IllegalArgumentException) {
+                e.message ?: "Link não suportado"
             } catch (e: Exception) {
                 "Não deu para falar com a TV: ${e.message}"
             }
@@ -44,14 +46,13 @@ class CastActivity : Activity() {
     }
 
     /** Returns the API path and body for this intent. */
-    private fun build(intent: Intent): Pair<String, JSONObject>? {
+    private fun build(intent: Intent, host: String): Pair<String, JSONObject>? {
+        localFiles(intent).takeIf { it.isNotEmpty() }?.let { return shareLocal(it, host) }
         val sharedText = intent.getStringExtra(Intent.EXTRA_TEXT)
         val url = intent.data?.toString()
             ?: sharedText?.let { Regex("https?://\\S+").find(it)?.value }
             ?: return null
-        if (url.startsWith("content:") || url.startsWith("file:")) {
-            throw IllegalArgumentException("Arquivos guardados no celular ainda não podem tocar na TV")
-        }
+        if (url.startsWith("file:")) throw IllegalArgumentException("Esse arquivo não pode ser aberto: compartilhe pela galeria")
 
         // Shared web pages (not video files) open in the matching TV app or browser instead
         val isShare = intent.action == Intent.ACTION_SEND
@@ -68,6 +69,40 @@ class CastActivity : Activity() {
         if (headers.length() > 0) body.put("headers", headers)
         body.put("fields", describeExtras(intent))
         return "/api/play" to body
+    }
+
+    /** Photos and videos stored on the phone that came with the intent (content:// addresses). */
+    private fun localFiles(intent: Intent): List<Uri> {
+        val uris = when (intent.action) {
+            Intent.ACTION_SEND -> listOfNotNull(stream(intent))
+            Intent.ACTION_SEND_MULTIPLE -> streams(intent)
+            Intent.ACTION_VIEW -> listOfNotNull(intent.data)
+            else -> emptyList()
+        }
+        return uris.filter { it.scheme == "content" }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun stream(intent: Intent): Uri? = intent.getParcelableExtra(Intent.EXTRA_STREAM)
+
+    @Suppress("DEPRECATION")
+    private fun streams(intent: Intent): List<Uri> = intent.getParcelableArrayListExtra<Uri>(Intent.EXTRA_STREAM).orEmpty()
+
+    /** Photos become a slideshow on the TV; a video plays in the TV's player (one at a time). */
+    private fun shareLocal(uris: List<Uri>, host: String): Pair<String, JSONObject> {
+        val photos = uris.filter { contentResolver.getType(it)?.startsWith("image/") == true }
+        if (photos.isNotEmpty()) {
+            val urls = ShareServer.share(this, photos, host)
+            return "/api/photos" to JSONObject().put("urls", JSONArray(urls))
+        }
+        val video = uris.firstOrNull { contentResolver.getType(it)?.startsWith("video/") == true }
+            ?: throw IllegalArgumentException("Só fotos e vídeos podem ir para a TV")
+        val url = ShareServer.share(this, listOf(video), host).first()
+        val name = contentResolver.query(video, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
+            if (it.moveToFirst()) it.getString(0) else null
+        }
+        return "/api/play" to JSONObject().put("url", url).put("type", contentResolver.getType(video))
+            .put("title", name?.substringBeforeLast('.') ?: "Vídeo do celular")
     }
 
     /** Names and types of every field the video app sent, so a subtitle we missed can be found. */

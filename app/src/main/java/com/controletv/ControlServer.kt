@@ -291,6 +291,15 @@ class ControlServer(
                 ))))
             }
 
+            // Photos shared from the phone's gallery, shown full screen straight from the phone
+            path == "/api/photos" && post -> {
+                val array = body(session).getJSONArray("urls")
+                val urls = List(array.length()) { array.getString(it) }.filter { it.startsWith("http://") || it.startsWith("https://") }
+                if (urls.isEmpty()) throw IllegalArgumentException("Nenhuma foto")
+                PhotoShowActivity.open(context, urls)
+                ok()
+            }
+
             // Second screen: cast with photos and a summary of a title; an actor's bio and films
             path == "/api/film" -> {
                 val id = session.parameters["id"]?.firstOrNull().orEmpty()
