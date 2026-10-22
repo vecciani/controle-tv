@@ -47,9 +47,12 @@ class ControlService : Service() {
             var askedService = false
             var askedPhotos = false
             var askedAudio = false
+            var askedHome = false
             while (true) {
                 Thread.sleep(10_000)
                 try {
+                    // Projector / TV box: make ours the default home screen once ADB is there
+                    if (!askedHome && Adb.state == Adb.State.OK) { askedHome = true; HomeWatcher.ensureRealHome(this, withAdb = true) }
                     if (ScreenSaver.enabled(this) && Adb.state == Adb.State.OK) {
                         // The idle detection needs the accessibility service; photos need storage access
                         if (!HomeWatcher.running && !askedService) { askedService = true; HomeWatcher.enableForScreensaver(this) }

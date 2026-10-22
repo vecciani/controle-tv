@@ -79,6 +79,8 @@ class DeviceSetup(private val context: Context) {
             // Long wait: installing a 30 MB app on a slow box takes a while
             Dadb.create(ip, PORT, keys, 3_000, 300_000).use { adb ->
                 AdbInstall.install(adb, listOf(apk))
+                // Home screen of the projector from now on (the app can be switched off in Ajustes)
+                adb.shell("pm enable com.controletv/com.controletv.HomeScreen; cmd package set-home-activity com.controletv/com.controletv.HomeScreen")
                 adb.shell("am start -n com.controletv/.MainActivity")
             }
         } finally {

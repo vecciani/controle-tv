@@ -114,6 +114,20 @@ class HomeWatcher : AccessibilityService() {
             setEnabled(true)
         }
 
+        /**
+         * Projectors and TV boxes: ours is the home screen unless the user turned it off. The
+         * home entry is switched on right away; making it the default needs ADB ([withAdb]).
+         */
+        fun ensureRealHome(context: Context, withAdb: Boolean) {
+            if (isFireTv(context) || !redirectHome(context)) return
+            val alias = ComponentName(context, HOME_ALIAS)
+            if (context.packageManager.getComponentEnabledSetting(alias) != PackageManager.COMPONENT_ENABLED_STATE_ENABLED) {
+                context.packageManager.setComponentEnabledSetting(alias, PackageManager.COMPONENT_ENABLED_STATE_ENABLED, PackageManager.DONT_KILL_APP)
+                homePackages = null
+            }
+            if (withAdb) runCatching { Adb.shell("cmd package set-home-activity ${context.packageName}/$HOME_ALIAS") }
+        }
+
         fun setRedirectHome(context: Context, on: Boolean) {
             context.getSharedPreferences("home", Context.MODE_PRIVATE).edit().putBoolean("redirect", on).apply()
             if (!isFireTv(context)) setRealHome(context, on)

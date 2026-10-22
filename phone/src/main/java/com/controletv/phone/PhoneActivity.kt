@@ -199,14 +199,21 @@ class PhoneActivity : Activity() {
     /** What a Controle TV server says about itself. */
     private data class Hello(val ip: String, val name: String, val kind: String)
 
-    /** Asks a host whether it's our TV server. Older TV versions don't say their kind: they're the Fire TV. */
-    private fun hello(ip: String): Hello? = try {
+    /**
+     * Asks a host whether it's our TV server. Older TV versions don't say their kind: Fire TV
+     * models start with "AFT", anything else is the projector.
+     */
+    private fun hello(ip: String, quick: Boolean = false): Hello? = try {
         val conn = URL("http://$ip:8765/api/hello").openConnection() as HttpURLConnection
-        conn.connectTimeout = 2_500
-        conn.readTimeout = 2_500
+        conn.connectTimeout = if (quick) 700 else 2_500
+        conn.readTimeout = if (quick) 1_500 else 2_500
         val json = JSONObject(conn.inputStream.use { it.readBytes().decodeToString() })
         if (json.optString("app") != "controle-tv") null
-        else Hello(ip, json.optString("name", "TV"), json.optString("kind", "tv"))
+        else {
+            val name = json.optString("name", "TV")
+            val kind = json.optString("kind").ifEmpty { if (name.startsWith("AFT") || name.contains("Fire", true)) "tv" else "projetor" }
+            Hello(ip, name, kind)
+        }
     } catch (e: Exception) {
         null
     }
@@ -598,16 +605,24 @@ class PhoneActivity : Activity() {
         extra.removeAllViews()
         Thread {
             val saved = prefs.getString("ip_${role.id}", null)
+            var all: List<Hello> = emptyList()
             val found = saved?.let { hello(it) }?.takeIf { it.kind == role.id }
                 ?: run {
                     main.post { subtitle.text = "Procurando na rede…" }
-                    scan().firstOrNull { it.kind == role.id }
+                    all = scan()
+                    all.firstOrNull { it.kind == role.id }
                 }
             main.post {
                 if (isFinishing) return@post
                 if (found != null) return@post choose(role, found)
                 subtitle.text = "Não encontrado"
                 status.visibility = android.view.View.VISIBLE
+                // Something with Controle TV answered, just not as this kind: let the user pick it
+                val otherIp = prefs.getString("ip_${if (role.id == "tv") "projetor" else "tv"}", null)
+                all.filter { it.ip != otherIp }.forEach { h ->
+                    extra.addView(button("Usar ${h.name} (${h.ip}) como ${role.title.lowercase()}", SURFACE, TEXT) { choose(role, h) },
+                        LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { bottomMargin = dp(10) })
+                }
                 if (role.id == "projetor") {
                     status.text = "O Controle TV não está aberto no projetor. Ligue o projetor no mesmo Wi-Fi do celular. Se ainda não instalou, instale abaixo (precisa da Depuração USB ligada nele)."
                     extra.addView(button("Instalar o Controle TV no projetor", VIOLET, BG) { installOnProjector(status, extra) })
@@ -682,22 +697,27 @@ class PhoneActivity : Activity() {
 
     private fun toast(message: String) = android.widget.Toast.makeText(this, message, android.widget.Toast.LENGTH_SHORT).show()
 
-    /** Looks for our TV server (port 8765) on every /24 network the phone is on. */
+    /**
+     * Looks for our TV server (port 8765) on the phone's Wi-Fi and hotspot networks (not mobile
+     * data or VPNs), quickly: short timeouts, many at once, at most ~10 seconds.
+     */
     private fun scan(): List<Hello> {
+        val skip = Regex("^(rmnet|ccmni|dummy|tun|ppp|clat|v4-|ip6tnl|sit|p2p).*")
         val prefixes = NetworkInterface.getNetworkInterfaces().toList()
-            .filter { it.isUp && !it.isLoopback }
+            .filter { it.isUp && !it.isLoopback && !skip.matches(it.name) }
             .flatMap { it.inetAddresses.toList() }
-            .filter { it is Inet4Address && it.isSiteLocalAddress }
+            .filter { it is Inet4Address && it.isSiteLocalAddress && !it.hostAddress!!.startsWith("192.0.0.") }
             .map { it.hostAddress!!.substringBeforeLast('.') }
             .distinct()
-        val pool = Executors.newFixedThreadPool(48)
+        val pool = Executors.newFixedThreadPool(96)
         val results = java.util.Collections.synchronizedList(mutableListOf<Hello>())
         for (prefix in prefixes) for (i in 1..254) {
             val ip = "$prefix.$i"
-            pool.execute { hello(ip)?.let { results += it } }
+            pool.execute { hello(ip, quick = true)?.let { results += it } }
         }
         pool.shutdown()
-        pool.awaitTermination(20, TimeUnit.SECONDS)
+        pool.awaitTermination(10, TimeUnit.SECONDS)
+        pool.shutdownNow()
         return results.sortedBy { it.ip }
     }
 

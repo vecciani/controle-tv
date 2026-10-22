@@ -181,6 +181,7 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         ControlService.start(this)
+        HomeWatcher.ensureRealHome(this, withAdb = false)
         setContentView(buildScreen())
         header.post { fitWelcome() }
         registerReceiver(packages, IntentFilter().apply {
