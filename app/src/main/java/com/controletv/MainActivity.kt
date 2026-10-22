@@ -180,6 +180,7 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        RemoteImages.init(this)
         ControlService.start(this)
         HomeWatcher.ensureRealHome(this, withAdb = false)
         setContentView(buildScreen())
