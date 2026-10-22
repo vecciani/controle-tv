@@ -1692,7 +1692,7 @@ async function loadMovies() {
   if (query) return searchMovies(query);
 
   const body = $('movies-body');
-  body.replaceChildren();
+  body.replaceChildren(discoverCard());
   if (!stremio.loggedIn) body.append(loginCard());
   if (stremio.loggedIn) {
     try {
@@ -1932,6 +1932,95 @@ async function loadGenreShelves(body) {
     }
     if (mixed.length) body.append(shelf(title, mixed.map((m) => posterCard(m))));
   }
+}
+
+// ---------- "Não sei o que ver": hidden gems, not the obvious picks ----------
+
+const DISCOVER_GROUPS = [
+  ['type', 'Tipo', [['movie', 'Filme'], ['series', 'Série']]],
+  ['mood', 'Clima', [['qualquer', 'Tanto faz'], ['rir', 'Rir'], ['tensao', 'Tensão'], ['emocionar', 'Emocionar'], ['susto', 'Susto'], ['pensar', 'Pensar'], ['aventura', 'Aventura']]],
+  ['time', 'Tempo', [['curto', 'Até 1h40'], ['medio', 'Até 2h10'], ['qualquer', 'Tanto faz']]],
+  ['with', 'Com quem', [['sozinho', 'Sozinho'], ['casal', 'Casal'], ['familia', 'Família']]],
+  ['far', 'De onde', [['0', 'Qualquer lugar'], ['1', 'Fora dos EUA']]],
+];
+
+function discoverCard() {
+  const card = document.createElement('button');
+  card.className = 'discover-card';
+  card.innerHTML = `${icon('star')}<span><strong>Não sei o que ver</strong><small>Joias bem avaliadas que pouca gente viu, do seu jeito</small></span>${icon('right')}`;
+  card.onclick = discoverSheet;
+  return card;
+}
+
+function discoverSheet() {
+  let choice = { type: 'movie', mood: 'qualquer', time: 'qualquer', with: 'sozinho', far: '0' };
+  try { choice = { ...choice, ...JSON.parse(store.get('discover') || '{}') }; } catch {}
+  const sheet = openSheet(`
+    <div class="sheet-head"><div><h3>Não sei o que ver</h3><p>Nada de óbvio: nota alta, pouca gente viu, e nada que você já tem</p></div></div>
+    <div id="dc-groups"></div>
+    <div class="sheet-actions"><button class="sheet-btn primary" id="dc-go">${icon('zap')}Sortear</button></div>
+    <div id="dc-results"></div>`);
+  const groups = sheet.querySelector('#dc-groups');
+  const paint = () => {
+    groups.replaceChildren(...DISCOVER_GROUPS.filter(([key]) => !(key === 'time' && choice.type === 'series')).map(([key, label, options]) => {
+      const wrap = document.createElement('div');
+      wrap.innerHTML = `<h4>${label}</h4><div class="chips"></div>`;
+      wrap.querySelector('.chips').append(...options.map(([value, text]) => {
+        const b = document.createElement('button');
+        b.className = 'chip' + (choice[key] === value ? ' on' : '');
+        b.textContent = text;
+        b.onclick = () => { choice[key] = value; paint(); };
+        return b;
+      }));
+      return wrap;
+    }));
+  };
+  paint();
+  const results = sheet.querySelector('#dc-results');
+  let list = [];
+  let at = 0;
+  const showThree = () => {
+    if (at >= list.length) at = 0;
+    const three = list.slice(at, at + 3);
+    at += 3;
+    results.replaceChildren(...three.map(gemCard));
+    if (list.length > 3) {
+      const more = document.createElement('button');
+      more.className = 'sheet-btn';
+      more.innerHTML = `${icon('refresh')}Mais 3`;
+      more.onclick = showThree;
+      results.append(more);
+    }
+  };
+  sheetButton(sheet, 'dc-go', async () => {
+    store.set('discover', JSON.stringify(choice));
+    results.replaceChildren(hintText('Garimpando joias… a primeira vez leva alguns segundos'));
+    try {
+      const q = new URLSearchParams(choice).toString();
+      ({ titles: list } = await api(`/api/discover?${q}`));
+      at = 0;
+      if (!list.length) results.replaceChildren(hintText('Nada com essas escolhas. Afrouxe o tempo ou o lugar e sorteie de novo.'));
+      else showThree();
+    } catch (e) { results.replaceChildren(hintText(e.message)); }
+  });
+}
+
+function gemCard(t) {
+  const card = document.createElement('article');
+  card.className = 'gem';
+  card.innerHTML = `<img alt=""><div><strong></strong><small class="why"></small><p></p>
+    <div class="gem-actions"><button class="pill glow">${icon('play')}Ver na TV</button><button class="pill">Detalhes</button></div></div>`;
+  card.querySelector('img').src = t.poster || `https://images.metahub.space/poster/medium/${t.id}/img`;
+  card.querySelector('strong').textContent = t.name;
+  card.querySelector('.why').textContent = t.why || '';
+  card.querySelector('p').textContent = t.description || '';
+  const [play, info] = card.querySelectorAll('.gem-actions button');
+  play.onclick = async () => {
+    try { await api('/api/stremio/open', { type: t.type, id: t.id }); toast(`Abrindo ${t.name} no Stremio`); closeSheet(); }
+    catch (e) { toast(e.message, true); }
+  };
+  info.onclick = () => titleSheet(t);
+  return card;
 }
 
 function shelf(title, cards) {

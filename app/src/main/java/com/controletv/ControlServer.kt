@@ -282,6 +282,15 @@ class ControlServer(
                 ok()
             }
 
+            // "Não sei o que ver": hidden gems for a mood, time, company and place
+            path == "/api/discover" -> {
+                fun p(name: String, default: String) = session.parameters[name]?.firstOrNull()?.ifEmpty { null } ?: default
+                ok(JSONObject().put("titles", Discover.suggest(context, Discover.Choice(
+                    mood = p("mood", "qualquer"), time = p("time", "qualquer"), company = p("with", "sozinho"),
+                    far = p("far", "0") == "1", type = p("type", "movie"),
+                ))))
+            }
+
             // A genre of Stremio's catalog (the projector's phone screen has many genre rows)
             path == "/api/stremio/genre" -> ok(JSONObject().put("metas", JSONArray(Stremio.genre(
                 session.parameters["type"]?.firstOrNull() ?: "movie", session.parameters["genre"]?.firstOrNull().orEmpty(),

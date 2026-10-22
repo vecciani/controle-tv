@@ -460,6 +460,27 @@ input, textarea, .report { -webkit-user-select: text; user-select: text; -webkit
 .poster .bar span { display: block; height: 100%; background: var(--cyan); }
 .poster strong { font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .poster small { font-size: 11px; color: var(--muted); margin-top: -4px; }
+/* Não sei o que ver */
+.discover-card { width: 100%; display: flex; align-items: center; gap: 12px; padding: 16px; margin: 0 0 18px; border-radius: 18px; text-align: left;
+  background: linear-gradient(135deg, rgba(251, 191, 36, .16), rgba(168, 85, 247, .14)), var(--surface); border: 1px solid rgba(251, 191, 36, .35); }
+.discover-card > svg:first-child { color: #fbbf24; width: 26px; height: 26px; flex: none; }
+.discover-card > svg:last-child { color: var(--muted); flex: none; }
+.discover-card span { flex: 1; display: flex; flex-direction: column; }
+.discover-card strong { font-size: 16px; }
+.discover-card small { color: var(--muted); font-size: 13px; margin-top: 2px; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip { padding: 9px 14px; border-radius: 999px; background: var(--surface); border: 1px solid var(--line); font-size: 14px; color: var(--muted); }
+.chip.on { color: var(--bg); background: var(--cyan); border-color: var(--cyan); font-weight: 600; }
+#dc-results { display: flex; flex-direction: column; gap: 12px; margin-top: 14px; }
+.gem { display: flex; gap: 12px; padding: 10px; border-radius: 16px; background: var(--surface); border: 1px solid var(--line); }
+.gem img { width: 92px; aspect-ratio: 2 / 3; object-fit: cover; border-radius: 10px; flex: none; background: var(--bg-2); }
+.gem > div { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.gem strong { font-size: 16px; }
+.gem .why { color: #fbbf24; font-size: 12px; margin-top: 3px; }
+.gem p { margin: 6px 0 8px; font-size: 13px; color: var(--muted); display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+.gem-actions { display: flex; gap: 8px; margin-top: auto; }
+.gem-actions .pill { padding: 8px 12px; font-size: 13px; }
+
 /* YouTube */
 .video { flex: 0 0 220px; display: flex; flex-direction: column; gap: 6px; text-align: left; }
 .video .art { position: relative; aspect-ratio: 16 / 9; border-radius: 12px; overflow: hidden; background: var(--surface); border: 1px solid var(--line); }

@@ -159,6 +159,7 @@ class MainActivity : Activity() {
     private val isProjector by lazy { deviceKind(this) == "projetor" }
     private val tabs by lazy { if (isProjector) TABS.filter { it.first != "youtube" } else TABS }
     private var popularMovies: List<JSONObject> = emptyList()
+    private var gems: List<JSONObject> = emptyList()
     private var popularSeries: List<JSONObject> = emptyList()
     private lateinit var brightnessBar: View
     private lateinit var brightnessLabel: TextView
@@ -880,6 +881,7 @@ class MainActivity : Activity() {
     private fun mediaRows() {
         rows.addView(row("Continuar assistindo",
             if (stremioWatching.isNotEmpty()) stremioWatching.take(12).map { stremioWideCard(it) } else listOf(stremioHintCard())))
+        if (gems.isNotEmpty()) rows.addView(row("Joias escondidas: bem avaliados que pouca gente viu", gems.take(MAX_PER_ROW).map { stremioPoster(it) }))
         if (popularMovies.isNotEmpty()) rows.addView(row("Filmes em alta", popularMovies.take(MAX_PER_ROW).map { stremioPoster(it) }))
         if (popularSeries.isNotEmpty()) rows.addView(row("Séries em alta", popularSeries.take(MAX_PER_ROW).map { stremioPoster(it) }))
         if (newMovies.isNotEmpty()) rows.addView(row("Filmes novos", newMovies.take(MAX_PER_ROW).map { stremioPoster(it) }))
@@ -1087,6 +1089,11 @@ class MainActivity : Activity() {
             val series = catalog("series")
             fun popular(type: String) = runCatching { Stremio.catalog(type, null).let { a -> List(a.length()) { a.getJSONObject(it) } } }.getOrDefault(emptyList())
             val topMovies = if (isProjector) popular("movie") else emptyList()
+            // A fresh draw of hidden gems (catalog pages are kept for hours, so this is light)
+            val hidden = runCatching {
+                Discover.suggest(this, Discover.Choice("qualquer", "qualquer", "sozinho", far = false, type = "movie"))
+                    .let { a -> List(a.length()) { a.getJSONObject(it) } }
+            }.getOrDefault(gems)
             val topSeries = if (isProjector) popular("series") else emptyList()
             // Genre rows mix films and series, alternating
             val genres = (if (isProjector) PROJECTOR_GENRES else GENRES).map { (title, genre) ->
@@ -1101,6 +1108,7 @@ class MainActivity : Activity() {
                 newMovies = movies
                 newSeries = series
                 popularMovies = topMovies
+                gems = hidden
                 popularSeries = topSeries
                 genreRows = genres
                 stremioVersion++
