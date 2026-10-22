@@ -45,4 +45,17 @@ class AiWeeklyTest {
     fun nothingFromGarbage() {
         assertTrue(AiWeekly.parse("Desculpe, não posso ajudar").isEmpty())
     }
+
+    @Test
+    fun picksAFastTextModel() {
+        val ranked = AiWeekly.rankModels(listOf(
+            "gemini-2.0-flash", "gemini-2.5-pro", "gemini-2.5-flash-image", "gemini-3-flash", "gemini-2.5-flash-lite",
+            "gemini-flash-latest", "embedding-001", "gemini-2.5-flash-preview-tts",
+        ))
+        assertEquals("gemini-flash-latest", ranked.first())
+        assertEquals("gemini-3-flash", ranked[1])
+        assertTrue("gemini-2.5-flash-image" !in ranked)
+        assertTrue("embedding-001" !in ranked)
+        assertTrue(ranked.indexOf("gemini-2.5-pro") > ranked.indexOf("gemini-2.0-flash"))
+    }
 }

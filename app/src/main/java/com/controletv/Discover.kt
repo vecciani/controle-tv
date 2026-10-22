@@ -29,11 +29,14 @@ object Discover {
     )
 
     data class Choice(
-        val mood: String,      // rir, tensao, emocionar, susto, pensar, aventura, qualquer
-        val time: String,      // curto (até 1h40), medio (até 2h10), qualquer
-        val company: String,   // sozinho, casal, familia
-        val far: Boolean,      // outside the US
-        val type: String,      // movie, series
+        val mood: String,               // rir, tensao, emocionar, susto, pensar, aventura, leve, romance, misterio, crime, animacao, documentario, qualquer
+        val time: String,               // curto (até 1h40), medio (até 2h10), qualquer
+        val company: String,            // sozinho, casal, familia
+        val region: String = "qualquer", // qualquer, fora (dos EUA), asia, europa, latam, brasil
+        val type: String = "movie",     // movie, series
+        val era: String = "qualquer",   // qualquer, classico (até 1979), 8090, 0015, recente (2016+)
+        val minRating: Double = 7.0,
+        val depth: String = "pouco",    // pouco (fora dos 150 mais populares), escondido (fora dos 400)
     )
 
     private val MOODS = mapOf(
@@ -43,6 +46,12 @@ object Discover {
         "susto" to listOf("Horror"),
         "pensar" to listOf("Sci-Fi", "Mystery", "Documentary"),
         "aventura" to listOf("Adventure", "Action", "Fantasy"),
+        "leve" to listOf("Comedy", "Family", "Animation", "Romance"),
+        "romance" to listOf("Romance"),
+        "misterio" to listOf("Mystery"),
+        "crime" to listOf("Crime"),
+        "animacao" to listOf("Animation"),
+        "documentario" to listOf("Documentary"),
         "qualquer" to listOf("Drama", "Comedy", "Thriller", "Sci-Fi", "Adventure", "Crime"),
     )
 
@@ -55,14 +64,20 @@ object Discover {
         val type = if (choice.type == "series") "series" else "movie"
         var genres = MOODS[choice.mood] ?: MOODS.getValue("qualquer")
         if (choice.company == "familia") genres = (genres + listOf("Family", "Animation")).distinct() - "Horror"
-        // The obvious ones: each genre's 150 most popular; the pool: best rated, and deeper in popularity
+        // The obvious ones: each genre's most popular (150, or 400 for "bem escondido");
+        // the pool: best rated, and deeper in popularity (deeper still for a region or "escondido")
+        val hidden = choice.depth == "escondido"
+        val narrow = choice.region != "qualquer"
+        val obviousPages = if (hidden) (0..350 step 50) else (0..100 step 50)
+        val ratedPages = if (hidden) (200..500 step 50) else (0..(if (narrow) 350 else 200) step 50)
+        val deepPages = if (hidden) (400..700 step 50) else (150..(if (narrow) 450 else 300) step 50)
         val obvious = mutableSetOf<String>()
         val poolTitles = mutableListOf<JSONObject>()
         val jobs = mutableListOf<Pair<Boolean, Future<List<JSONObject>>>>()
         for (g in genres) {
-            for (skip in listOf(0, 50, 100)) jobs += true to pool.submit<List<JSONObject>> { page(type, "top", g, skip) }
-            for (skip in listOf(0, 50, 100, 150, 200)) jobs += false to pool.submit<List<JSONObject>> { page(type, "imdbRating", g, skip) }
-            for (skip in listOf(150, 200, 250, 300)) jobs += false to pool.submit<List<JSONObject>> { page(type, "top", g, skip) }
+            for (skip in obviousPages) jobs += true to pool.submit<List<JSONObject>> { page(type, "top", g, skip) }
+            for (skip in ratedPages) jobs += false to pool.submit<List<JSONObject>> { page(type, "imdbRating", g, skip) }
+            for (skip in deepPages) jobs += false to pool.submit<List<JSONObject>> { page(type, "top", g, skip) }
         }
         for ((isObvious, job) in jobs) {
             val metas = runCatching { job.get() }.getOrDefault(emptyList())
@@ -79,13 +94,22 @@ object Discover {
 
     /** The filtering and shuffling, apart from the network (tested). */
     fun pick(titles: List<Title>, choice: Choice, exclude: Set<String>, random: Random): List<Title> {
-        val minRating = if (choice.type == "series") 7.5 else 7.0
+        // Series are rated higher on IMDb in general: ask a bit more of them
+        val minRating = choice.minRating + if (choice.type == "series") 0.4 else 0.0
         val maxMinutes = when (choice.time) { "curto" -> 100; "medio" -> 130; else -> Int.MAX_VALUE }
+        val years = when (choice.era) {
+            "classico" -> 1900..1979
+            "8090" -> 1980..1999
+            "0015" -> 2000..2015
+            "recente" -> 2016..2100
+            else -> 1900..2100
+        }
         val candidates = titles.filter { t ->
             t.id !in exclude &&
                 t.rating >= minRating &&
                 (choice.type == "series" || (t.runtime ?: 0) in 60..maxMinutes) &&
-                (!choice.far || (t.country.isNotBlank() && !t.country.contains("United States"))) &&
+                (t.year.take(4).toIntOrNull() ?: 0).let { it == 0 && choice.era == "qualquer" || it in years } &&
+                inRegion(t.country, choice.region) &&
                 (choice.company != "familia" || (t.genres.any { it == "Family" || it == "Animation" } && "Horror" !in t.genres)) &&
                 (choice.mood != "rir" || "Horror" !in t.genres)
         }
@@ -106,6 +130,25 @@ object Discover {
             year = meta.optString("releaseInfo").ifEmpty { meta.optString("year") },
             json = meta,
         )
+    }
+
+    private val REGIONS = mapOf(
+        "asia" to setOf("South Korea", "Japan", "China", "Hong Kong", "Taiwan", "Thailand", "India", "Indonesia", "Philippines", "Vietnam", "Malaysia", "Singapore"),
+        "europa" to setOf("France", "Spain", "Germany", "Italy", "United Kingdom", "Denmark", "Sweden", "Norway", "Ireland", "Belgium",
+            "Netherlands", "Poland", "Finland", "Iceland", "Austria", "Switzerland", "Portugal", "Czech Republic", "Czechia", "Greece",
+            "Hungary", "Romania", "Russia", "Ukraine", "Turkey"),
+        "latam" to setOf("Brazil", "Argentina", "Mexico", "Chile", "Colombia", "Peru", "Uruguay", "Cuba", "Venezuela", "Bolivia", "Paraguay"),
+        "brasil" to setOf("Brazil"),
+    )
+
+    /** Made (mainly) in the chosen region; "fora" is anything without the US. */
+    fun inRegion(country: String, region: String): Boolean {
+        val countries = country.split(',').map { it.trim() }.filter { it.isNotEmpty() }
+        return when (region) {
+            "qualquer" -> true
+            "fora" -> countries.isNotEmpty() && "United States" !in countries
+            else -> countries.firstOrNull()?.let { it in REGIONS[region].orEmpty() } == true
+        }
     }
 
     /** "IMDb 7,8 · pouco conhecido · 1h54 · Coreia do Sul". */

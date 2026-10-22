@@ -303,7 +303,9 @@ class ControlServer(
                 fun p(name: String, default: String) = session.parameters[name]?.firstOrNull()?.ifEmpty { null } ?: default
                 ok(JSONObject().put("titles", Discover.suggest(context, Discover.Choice(
                     mood = p("mood", "qualquer"), time = p("time", "qualquer"), company = p("with", "sozinho"),
-                    far = p("far", "0") == "1", type = p("type", "movie"),
+                    // "far=1" from older phone screens means outside the US
+                    region = p("region", if (p("far", "0") == "1") "fora" else "qualquer"), type = p("type", "movie"),
+                    era = p("era", "qualquer"), minRating = p("rating", "7").toDoubleOrNull() ?: 7.0, depth = p("depth", "pouco"),
                 ))))
             }
 

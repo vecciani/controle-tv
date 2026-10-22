@@ -1114,7 +1114,7 @@ class MainActivity : Activity() {
             val topMovies = if (isProjector) popular("movie") else emptyList()
             // A fresh draw of hidden gems (catalog pages are kept for hours, so this is light)
             val hidden = runCatching {
-                Discover.suggest(this, Discover.Choice("qualquer", "qualquer", "sozinho", far = false, type = "movie"))
+                Discover.suggest(this, Discover.Choice("qualquer", "qualquer", "sozinho"))
                     .let { a -> List(a.length()) { a.getJSONObject(it) } }
             }.getOrDefault(gems)
             val topSeries = if (isProjector) popular("series") else emptyList()

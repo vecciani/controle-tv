@@ -1958,11 +1958,17 @@ async function loadGenreShelves(body) {
 
 const DISCOVER_GROUPS = [
   ['type', 'Tipo', [['movie', 'Filme'], ['series', 'Série']]],
-  ['mood', 'Clima', [['qualquer', 'Tanto faz'], ['rir', 'Rir'], ['tensao', 'Tensão'], ['emocionar', 'Emocionar'], ['susto', 'Susto'], ['pensar', 'Pensar'], ['aventura', 'Aventura']]],
+  ['mood', 'Clima', [['qualquer', 'Tanto faz'], ['rir', 'Rir'], ['leve', 'Leve'], ['tensao', 'Tensão'], ['emocionar', 'Emocionar'],
+    ['susto', 'Susto'], ['pensar', 'Pensar'], ['aventura', 'Aventura'], ['romance', 'Romance'], ['misterio', 'Mistério'],
+    ['crime', 'Crime'], ['animacao', 'Animação'], ['documentario', 'Documentário']]],
   ['time', 'Tempo', [['curto', 'Até 1h40'], ['medio', 'Até 2h10'], ['qualquer', 'Tanto faz']]],
   ['with', 'Com quem', [['sozinho', 'Sozinho'], ['casal', 'Casal'], ['familia', 'Família']]],
-  ['far', 'De onde', [['0', 'Qualquer lugar'], ['1', 'Fora dos EUA']]],
+  ['era', 'Época', [['qualquer', 'Tanto faz'], ['classico', 'Clássicos'], ['8090', 'Anos 80 e 90'], ['0015', '2000 a 2015'], ['recente', 'Recentes']]],
+  ['region', 'De onde', [['qualquer', 'Qualquer lugar'], ['fora', 'Fora dos EUA'], ['asia', 'Ásia'], ['europa', 'Europa'], ['latam', 'América Latina'], ['brasil', 'Brasil']]],
+  ['rating', 'Nota mínima no IMDb', [['7', '7+'], ['7.5', '7,5+'], ['8', '8+']]],
+  ['depth', 'Quão escondido', [['pouco', 'Pouco conhecido'], ['escondido', 'Bem escondido']]],
 ];
+const DISCOVER_DEFAULT = { type: 'movie', mood: 'qualquer', time: 'qualquer', with: 'sozinho', era: 'qualquer', region: 'qualquer', rating: '7', depth: 'pouco' };
 
 function discoverCard() {
   const card = document.createElement('button');
@@ -1973,12 +1979,19 @@ function discoverCard() {
 }
 
 function discoverSheet() {
-  let choice = { type: 'movie', mood: 'qualquer', time: 'qualquer', with: 'sozinho', far: '0' };
+  let choice = { ...DISCOVER_DEFAULT };
   try { choice = { ...choice, ...JSON.parse(store.get('discover') || '{}') }; } catch {}
+  // Older saved choices had "far" instead of a region
+  if (choice.far === '1' && choice.region === 'qualquer') choice.region = 'fora';
+  delete choice.far;
   const sheet = openSheet(`
     <div class="sheet-head"><div><h3>Não sei o que ver</h3><p>Nada de óbvio: nota alta, pouca gente viu, e nada que você já tem</p></div></div>
     <div id="dc-groups"></div>
-    <div class="sheet-actions"><button class="sheet-btn primary" id="dc-go">${icon('zap')}Sortear</button></div>
+    <div class="sheet-actions">
+      <button class="sheet-btn primary" id="dc-go">${icon('zap')}Sortear</button>
+      <button class="sheet-btn" id="dc-surprise">${icon('sparkles')}Surpreenda-me</button>
+      <button class="sheet-btn" id="dc-reset">${icon('refresh')}Limpar escolhas</button>
+    </div>
     <div id="dc-results"></div>`);
   const groups = sheet.querySelector('#dc-groups');
   const paint = () => {
@@ -2012,6 +2025,17 @@ function discoverSheet() {
       results.append(more);
     }
   };
+  const pick = (list) => list[Math.floor(Math.random() * list.length)];
+  sheetButton(sheet, 'dc-reset', () => { choice = { ...DISCOVER_DEFAULT }; paint(); });
+  // Surprise: a random mood, era and place (keeps film/series and company), then draws
+  sheetButton(sheet, 'dc-surprise', () => {
+    choice.mood = pick(DISCOVER_GROUPS[1][2].map(([v]) => v).filter((v) => v !== 'qualquer'));
+    choice.era = pick(['qualquer', 'classico', '8090', '0015', 'recente']);
+    choice.region = pick(['qualquer', 'fora', 'asia', 'europa', 'latam']);
+    choice.depth = pick(['pouco', 'escondido']);
+    paint();
+    sheet.querySelector('#dc-go').click();
+  });
   sheetButton(sheet, 'dc-go', async () => {
     store.set('discover', JSON.stringify(choice));
     results.replaceChildren(hintText('Garimpando joias… a primeira vez leva alguns segundos'));

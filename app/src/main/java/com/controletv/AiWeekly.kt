@@ -17,7 +17,8 @@ import java.util.Locale
  */
 object AiWeekly {
     private const val API = "https://generativelanguage.googleapis.com/v1beta/models"
-    private val MODELS = listOf("gemini-flash-latest", "gemini-2.5-flash", "gemini-2.0-flash")
+    /** Tried when the list of models can't be read (names change often, so the list comes first). */
+    private val FALLBACK_MODELS = listOf("gemini-flash-latest", "gemini-2.5-flash", "gemini-2.0-flash")
 
     @Volatile var generating = false
         private set
@@ -41,7 +42,9 @@ object AiWeekly {
             .put("items", saved.optJSONArray("items") ?: JSONArray())
     }
 
+    /** Saves the taste and key; a new key is checked with Google right away (throws with the reason). */
     fun configure(context: Context, key: String?, taste: String?) {
+        key?.trim()?.takeIf { it.isNotEmpty() }?.let { models(it) }
         prefs(context).edit().apply {
             key?.trim()?.let { putString("key", it) }
             taste?.trim()?.let { putString("taste", it.take(2000)) }
@@ -168,14 +171,49 @@ object AiWeekly {
             .put("description", if (s.why.isNotEmpty()) "Por que você vai gostar: ${s.why}" else meta.optString("description"))
     }
 
-    /** Sends the prompt to Gemini (trying newer model names first) and returns its text. */
+    /**
+     * The Gemini models this key may use for text, best first: "flash" ones (fast, in the free
+     * tier), newest version first, leaving out the special ones (image, audio, live…).
+     * Throws with a clear reason when the key is wrong.
+     */
+    fun models(key: String): List<String> {
+        val conn = URL("$API?pageSize=200&key=${URLEncoder.encode(key, "UTF-8")}").openConnection() as HttpURLConnection
+        conn.connectTimeout = 10_000
+        conn.readTimeout = 20_000
+        val code = conn.responseCode
+        val text = (if (code < 400) conn.inputStream else conn.errorStream)?.use { it.readBytes().decodeToString() }.orEmpty()
+        conn.disconnect()
+        if (code == 400 || code == 403) throw IllegalStateException("O Google recusou a chave: confira se copiou inteira (começa com AIza)")
+        if (code >= 400) throw IllegalStateException("O Google respondeu com erro $code ao conferir a chave")
+        val array = JSONObject(text).optJSONArray("models") ?: JSONArray()
+        val names = List(array.length()) { array.getJSONObject(it) }
+            .filter { m -> m.optJSONArray("supportedGenerationMethods")?.toString()?.contains("generateContent") == true }
+            .map { it.optString("name").removePrefix("models/") }
+        return rankModels(names)
+    }
+
+    /** Flash models first, newest version first; no image/audio/live/embedding variants. */
+    fun rankModels(names: List<String>): List<String> {
+        val skip = Regex("(?i)image|audio|tts|live|embed|vision|thinking-exp|robotics|computer|learnlm|gemma")
+        fun version(name: String) = Regex("(\\d+(?:\\.\\d+)?)").find(name)?.value?.toDoubleOrNull() ?: 0.0
+        return names.filter { it.startsWith("gemini") && !skip.containsMatchIn(it) }
+            .sortedWith(compareByDescending<String> { "flash" in it && "lite" !in it }
+                .thenByDescending { it.endsWith("-latest") }
+                .thenByDescending { version(it) }
+                .thenBy { "preview" in it || "exp" in it })
+    }
+
+    /** Sends the prompt to the best available Gemini model and returns its text. */
     private fun ask(key: String, prompt: String): String {
         val body = JSONObject()
             .put("contents", JSONArray().put(JSONObject().put("parts", JSONArray().put(JSONObject().put("text", prompt)))))
             .put("generationConfig", JSONObject().put("responseMimeType", "application/json").put("temperature", 1.0))
             .toString()
         var lastError = "sem resposta"
-        for (model in MODELS) {
+        val candidates = (runCatching { models(key) }.getOrElse { e ->
+            if (e.message?.contains("recusou") == true) throw e else emptyList()
+        } + FALLBACK_MODELS).distinct().take(4)
+        for (model in candidates) {
             val conn = URL("$API/$model:generateContent?key=${URLEncoder.encode(key, "UTF-8")}").openConnection() as HttpURLConnection
             conn.requestMethod = "POST"
             conn.connectTimeout = 10_000
@@ -189,14 +227,19 @@ object AiWeekly {
             when {
                 code == 404 -> { lastError = "modelo $model indisponível"; continue }
                 code == 400 && text.contains("API key", ignoreCase = true) -> throw IllegalStateException("A chave do Gemini não é válida")
-                code == 429 -> throw IllegalStateException("O limite gratuito do Gemini acabou por hoje. Tente amanhã.")
-                code >= 400 -> throw IllegalStateException("O Gemini respondeu com erro $code")
+                // This model's free quota is used up: another one may still have some
+                code == 429 -> { lastError = "limite gratuito do $model atingido"; continue }
+                code >= 400 -> {
+                    val reason = runCatching { JSONObject(text).getJSONObject("error").getString("message") }.getOrDefault("")
+                    lastError = "erro $code no $model ${reason.take(160)}".trim()
+                    continue
+                }
             }
             val parts = JSONObject(text).optJSONArray("candidates")?.optJSONObject(0)?.optJSONObject("content")?.optJSONArray("parts")
                 ?: throw IllegalStateException("O Gemini não sugeriu nada desta vez")
             return List(parts.length()) { parts.getJSONObject(it).optString("text") }.joinToString("")
         }
-        throw IllegalStateException("Não achei um modelo do Gemini disponível ($lastError)")
+        throw IllegalStateException(if ("limite" in lastError) "O limite gratuito do Gemini acabou por hoje. Tente amanhã." else "O Gemini não respondeu: $lastError")
     }
 
     private fun prefs(context: Context) = context.getSharedPreferences("ai", Context.MODE_PRIVATE)
