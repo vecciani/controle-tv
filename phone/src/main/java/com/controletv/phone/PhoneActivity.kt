@@ -71,7 +71,12 @@ class PhoneActivity : Activity() {
                 System.currentTimeMillis() - lastTvCheck > 30 * 60 * 1000L
             ) {
                 lastTvCheck = System.currentTimeMillis()
-                Thread { TvUpdater.updateIfNeeded(this@PhoneActivity, host, token, r)?.let { jsToast(it) } }.start()
+                Thread {
+                    // Straight over ADB, showing each step; quiet only when there's nothing to do
+                    runCatching { deviceSetup.updateTvApp(host) { step -> jsToast(step) } }
+                        .onSuccess { if (!it.startsWith("Já está")) jsToast("TV: $it") }
+                        .onFailure { jsToast("Não deu para atualizar a TV: ${it.message}") }
+                }.start()
             }
             main.postDelayed(this, 10_000)
         }
@@ -358,7 +363,8 @@ class PhoneActivity : Activity() {
             val token = r.token ?: return jsToast("Ainda conectando à TV")
             jsToast("Verificando a versão da TV…")
             Thread {
-                jsToast(TvUpdater.updateIfNeeded(this@PhoneActivity, host, token, r, force = false) ?: "A TV já está na versão mais nova")
+                jsToast(runCatching { deviceSetup.updateTvApp(host) { step -> jsToast(step) } }
+                    .getOrElse { "Não deu para atualizar a TV: ${it.message}" })
             }.start()
         }
 
@@ -560,6 +566,9 @@ class PhoneActivity : Activity() {
         }
         root.addView(status, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(8) })
         root.addView(extra, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(12) })
+        // Works even when a TV's own pages are broken: goes straight over ADB
+        root.addView(button("Atualizar a TV e o projetor", SURFACE, TEXT) { updateAll(status) },
+            LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(18) })
         setContentView(android.widget.ScrollView(this).apply { setBackgroundColor(BG); addView(root) })
     }
 
@@ -630,6 +639,27 @@ class PhoneActivity : Activity() {
                     status.text = "Não achei a TV. Confira se a Fire TV está ligada, no mesmo Wi-Fi do celular, com o Controle TV instalado."
                 }
                 extra.addView(manualEntry(role), LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(12) })
+            }
+        }.start()
+    }
+
+    /** Updates the Controle TV app on every device used before (TV and projector), one after the other. */
+    private fun updateAll(status: TextView) {
+        status.visibility = android.view.View.VISIBLE
+        val targets = roles.mapNotNull { role -> prefs.getString("ip_${role.id}", null)?.let { role to it } }
+        if (targets.isEmpty()) {
+            status.text = "Conecte na TV ou no projetor uma vez antes, para o celular saber o endereço."
+            return
+        }
+        status.text = "Atualizando…"
+        Thread {
+            val lines = mutableListOf<String>()
+            for ((role, ip) in targets) {
+                val line = runCatching {
+                    deviceSetup.updateTvApp(ip) { step -> main.post { status.text = (lines + "${role.title}: $step").joinToString("\n") } }
+                }.fold({ "${role.title}: $it" }, { "${role.title}: não deu (${it.message})" })
+                lines += line
+                main.post { status.text = lines.joinToString("\n") }
             }
         }.start()
     }

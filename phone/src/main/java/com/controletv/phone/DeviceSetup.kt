@@ -89,6 +89,36 @@ class DeviceSetup(private val context: Context) {
         return "Controle TV instalado e aberto no aparelho"
     }
 
+    /**
+     * Brings the Controle TV app on [ip] up to the latest version straight over ADB: reads the
+     * installed version from the system, downloads and installs the new one, and opens it.
+     * Doesn't depend on the TV's own pages, so it works even when those are broken.
+     * Returns what happened, in words; throws with the reason when it fails.
+     */
+    fun updateTvApp(ip: String, progress: (String) -> Unit): String {
+        progress("Conferindo a versão…")
+        val info = JSONObject(TvUpdater.download(BuildConfig.UPDATE_URL).decodeToString())
+        val latest = info.getInt("apkVersion")
+        val installed = connect(ip).use { adb ->
+            Regex("versionCode=(\\d+)").find(adb.shell("dumpsys package com.controletv | grep versionCode").allOutput)
+                ?.groupValues?.get(1)?.toIntOrNull()
+        } ?: throw IllegalStateException("O Controle TV não está instalado neste aparelho")
+        if (installed >= latest) return "Já está na versão mais nova ($installed)"
+        progress("Baixando a versão $latest…")
+        val apk = File(context.cacheDir, "controle-tv-update.apk")
+        apk.writeBytes(TvUpdater.download(info.getString("apk")))
+        try {
+            progress("Instalando a versão $latest… (até 1 minuto)")
+            Dadb.create(ip, PORT, keys, 3_000, 300_000).use { adb ->
+                AdbInstall.install(adb, listOf(apk))
+                adb.shell("am start -n com.controletv/.MainActivity")
+            }
+        } finally {
+            apk.delete()
+        }
+        return "Atualizado da versão $installed para a $latest"
+    }
+
     /** Waits up to a minute for the user to accept "Allow debugging?" on the device. */
     private fun connect(ip: String): Dadb {
         if (!Regex("\\d{1,3}(\\.\\d{1,3}){3}").matches(ip)) throw IllegalArgumentException("Endereço inválido")
