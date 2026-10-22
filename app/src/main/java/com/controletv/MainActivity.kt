@@ -1124,7 +1124,7 @@ class MainActivity : Activity() {
     }
 
     private fun openInStremio(item: JSONObject, videoId: String?) {
-        runCatching { Stremio.openOnTv(this, item.optString("type"), item.optString("id"), videoId) }
+        runCatching { Stremio.openOnTv(this, item.optString("type"), item.optString("id"), videoId, item.optString("name").ifEmpty { null }) }
             .onFailure { toast(it.message ?: "Instale o Stremio na TV") }
     }
 

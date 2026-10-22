@@ -377,6 +377,7 @@ async function refreshStatus() {
     $('device-name').textContent = s.kind === 'projetor' ? 'Projetor' : s.kind === 'tv' ? 'TV' : '';
     applyKind(s.kind);
     renderNow(s.foreground);
+    renderWatching(s.watching);
   } catch {
     $('status-dot').className = 'dot off';
     $('status-text').textContent = 'TV fora do ar';
@@ -437,6 +438,15 @@ $('proj-bt-pair').addEventListener('click', async () => {
   try { await api('/api/projector/bluetooth/settings', {}); toast('Abrindo o Bluetooth no projetor: escolha a caixa ou o fone com o controle'); }
   catch (e) { toast(e.message, true); }
 });
+
+/** Stremio title on screen (opened from here): one tap shows its cast and story. */
+function renderWatching(w) {
+  const btn = $('now-film');
+  btn.hidden = !w;
+  if (!w) return;
+  $('now-film-label').textContent = w.name ? `Elenco e curiosidades de ${w.name}` : 'Elenco e curiosidades do que está passando';
+  btn.onclick = () => filmSheet(w);
+}
 
 function renderNow(fg) {
   const art = $('now-art');
@@ -2016,11 +2026,73 @@ function gemCard(t) {
   card.querySelector('p').textContent = t.description || '';
   const [play, info] = card.querySelectorAll('.gem-actions button');
   play.onclick = async () => {
-    try { await api('/api/stremio/open', { type: t.type, id: t.id }); toast(`Abrindo ${t.name} no Stremio`); closeSheet(); }
+    try { await api('/api/stremio/open', { type: t.type, id: t.id, name: t.name }); toast(`Abrindo ${t.name} no Stremio`); closeSheet(); }
     catch (e) { toast(e.message, true); }
   };
   info.onclick = () => titleSheet(t);
   return card;
+}
+
+// ---------- Second screen: cast with photos, the story, and each actor's other films ----------
+
+async function filmSheet(item) {
+  const type = item.type === 'series' ? 'series' : 'movie';
+  const sheet = openSheet(`
+    <div class="film-head"><img alt=""><div><h3></h3><p class="film-info"></p></div></div>
+    <h4>Sobre</h4>
+    <p class="meta-desc" id="f-about">Carregando…</p>
+    <h4>Elenco</h4>
+    <div class="cast-row" id="f-cast"><p class="hint">Carregando…</p></div>
+    <div class="sheet-actions"><button class="sheet-btn" id="f-close">${icon('x')}Fechar</button></div>`);
+  sheet.querySelector('.film-head img').src = `https://images.metahub.space/background/medium/${item.id}/img`;
+  sheet.querySelector('.film-head img').onerror = (e) => { e.target.hidden = true; };
+  sheet.querySelector('h3').textContent = item.name || '';
+  sheetButton(sheet, 'f-close', closeSheet);
+  try {
+    const r = await api(`/api/film?type=${type}&id=${encodeURIComponent(item.id)}`);
+    const meta = r.meta || {};
+    if (!item.name && meta.name) sheet.querySelector('h3').textContent = meta.name;
+    sheet.querySelector('.film-info').textContent = [meta.releaseInfo || meta.year, meta.imdbRating && `IMDb ${meta.imdbRating}`,
+      (meta.director || []).length ? `Direção: ${meta.director.join(', ')}` : ''].filter(Boolean).join(' · ');
+    sheet.querySelector('#f-about').textContent = r.about || meta.description || 'Sem resumo.';
+    const cast = r.cast || [];
+    sheet.querySelector('#f-cast').replaceChildren(...(cast.length ? cast.map(castItem) : [hintText('Elenco não encontrado')]));
+  } catch (e) {
+    sheet.querySelector('#f-about').textContent = e.message;
+    sheet.querySelector('#f-cast').replaceChildren();
+  }
+}
+
+function castItem(c) {
+  const b = document.createElement('button');
+  b.className = 'cast-item';
+  b.innerHTML = '<span class="cast-photo"></span><small></small>';
+  const photo = b.querySelector('.cast-photo');
+  if (c.photo) photo.innerHTML = `<img alt="" loading="lazy" src="${c.photo}">`;
+  else photo.textContent = (c.name || '?').split(' ').map((w) => w[0]).slice(0, 2).join('');
+  b.querySelector('small').textContent = c.name;
+  b.onclick = () => personSheet(c);
+  return b;
+}
+
+async function personSheet(c) {
+  const sheet = openSheet(`
+    <div class="person-head"><span class="cast-photo big"></span><div><h3></h3></div></div>
+    <p class="meta-desc" id="p-bio">Carregando…</p>
+    <h4>Filmes e séries</h4>
+    <div class="poster-grid" id="p-films"></div>
+    <div class="sheet-actions"><button class="sheet-btn" id="p-close">${icon('x')}Fechar</button></div>`);
+  sheet.querySelector('h3').textContent = c.name;
+  if (c.photo) sheet.querySelector('.cast-photo').innerHTML = `<img alt="" src="${c.photo}">`;
+  sheetButton(sheet, 'p-close', closeSheet);
+  try {
+    const p = await api(`/api/person?nm=${encodeURIComponent(c.nm || '')}&name=${encodeURIComponent(c.name || '')}`);
+    sheet.querySelector('#p-bio').textContent = p.bio || 'Sem biografia em português.';
+    if (p.photo && !c.photo) sheet.querySelector('.cast-photo').innerHTML = `<img alt="" src="${p.photo}">`;
+    const films = p.films || [];
+    sheet.querySelector('#p-films').replaceChildren(...(films.length ? films.map((f) => posterCard({ ...f, releaseInfo: f.year }))
+      : [hintText('A lista de filmes não respondeu agora. Tente de novo em alguns minutos.')]));
+  } catch (e) { sheet.querySelector('#p-bio').textContent = e.message; }
 }
 
 function shelf(title, cards) {
@@ -2056,17 +2128,19 @@ async function titleSheet(item) {
       ${item.videoId ? `<button class="sheet-btn primary" id="t-resume">${icon('play')}Continuar (${item.videoId.split(':').slice(1).join('x') || 'de onde parou'}) na TV</button>` : ''}
       <button class="sheet-btn${item.videoId ? '' : ' primary'}" id="t-tv">${icon('tv')}Abrir no Stremio da TV</button>
       ${native?.openUri ? `<button class="sheet-btn" id="t-phone">${icon('phone')}Abrir no Stremio do celular</button>` : ''}
+      <button class="sheet-btn" id="t-cast">${icon('info')}Elenco e curiosidades</button>
     </div>`);
   if (item.poster) sheet.querySelector('img').src = item.poster;
   sheet.querySelector('h3').textContent = item.name;
   const openTv = async (videoId) => {
     try {
-      await api('/api/stremio/open', { type, id: item.id, videoId: videoId || '' });
+      await api('/api/stremio/open', { type, id: item.id, videoId: videoId || '', name: item.name });
       toast(`Abrindo ${item.name} na TV`);
       closeSheet();
     } catch (e) { toast(e.message, true); }
   };
   sheetButton(sheet, 't-resume', () => openTv(item.videoId));
+  sheetButton(sheet, 't-cast', () => filmSheet({ id: item.id, type, name: item.name }));
   sheetButton(sheet, 't-tv', () => openTv(null));
   sheetButton(sheet, 't-phone', () => {
     const ok = native.openUri(`stremio:///detail/${type}/${encodeURIComponent(item.id)}`);

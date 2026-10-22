@@ -291,6 +291,22 @@ class ControlServer(
                 ))))
             }
 
+            // Second screen: cast with photos and a summary of a title; an actor's bio and films
+            path == "/api/film" -> {
+                val id = session.parameters["id"]?.firstOrNull().orEmpty()
+                val type = session.parameters["type"]?.firstOrNull() ?: "movie"
+                val meta = runCatching { Stremio.meta(type, id) }.getOrNull()
+                val order = meta?.optJSONArray("cast")?.let { a -> List(a.length()) { a.optString(it) } }.orEmpty()
+                ok(FilmInfo.title(id, order).put("meta", meta))
+            }
+
+            path == "/api/person" -> {
+                val nm = session.parameters["nm"]?.firstOrNull().orEmpty()
+                val name = session.parameters["name"]?.firstOrNull().orEmpty()
+                // Without Wikidata's id (or when it doesn't answer): Wikipedia by name
+                ok(if (nm.isNotEmpty()) runCatching { FilmInfo.person(nm) }.getOrElse { FilmInfo.personByName(name) } else FilmInfo.personByName(name))
+            }
+
             // A genre of Stremio's catalog (the projector's phone screen has many genre rows)
             path == "/api/stremio/genre" -> ok(JSONObject().put("metas", JSONArray(Stremio.genre(
                 session.parameters["type"]?.firstOrNull() ?: "movie", session.parameters["genre"]?.firstOrNull().orEmpty(),
@@ -331,7 +347,7 @@ class ControlServer(
 
             path == "/api/stremio/open" && post -> {
                 val body = body(session)
-                Stremio.openOnTv(context, body.optString("type"), body.getString("id"), body.optString("videoId").ifEmpty { null })
+                Stremio.openOnTv(context, body.optString("type"), body.getString("id"), body.optString("videoId").ifEmpty { null }, body.optString("name").ifEmpty { null })
                 ok()
             }
 
@@ -459,6 +475,11 @@ class ControlServer(
             .put("kind", deviceKind(context))
         foreground()?.let { pkg ->
             json.put("foreground", JSONObject().put("pkg", pkg).put("label", Apps.label(context, pkg)))
+            // Stremio on screen and opened from here: the phone can show that title's cast and info
+            val last = Stremio.lastOpened
+            if (pkg.startsWith("com.stremio") && last != null && System.currentTimeMillis() - last.optLong("at") < 8 * 3600_000L) {
+                json.put("watching", last)
+            }
         }
         if (local) {
             json.put("url", Net.url())

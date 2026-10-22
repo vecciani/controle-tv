@@ -104,8 +104,12 @@ object Stremio {
         return get("$CATALOG/meta/$safeType/$id.json").optJSONObject("meta") ?: JSONObject()
     }
 
+    /** The last title opened in Stremio through Controle TV, so the phone knows what's on screen. */
+    @Volatile var lastOpened: JSONObject? = null
+        private set
+
     /** Opens the title (or an episode) in the Stremio app on the TV. */
-    fun openOnTv(context: Context, type: String, id: String, videoId: String?) {
+    fun openOnTv(context: Context, type: String, id: String, videoId: String?, name: String? = null) {
         val uri = buildString {
             append("stremio:///detail/").append(if (type == "series") "series" else "movie").append('/').append(Uri.encode(id))
             if (!videoId.isNullOrBlank()) append('/').append(Uri.encode(videoId))
@@ -113,6 +117,8 @@ object Stremio {
         val intent = Intent(Intent.ACTION_VIEW, Uri.parse(uri)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         if (intent.resolveActivity(context.packageManager) == null) throw IllegalStateException("Instale o Stremio na TV")
         context.startActivity(intent)
+        lastOpened = JSONObject().put("id", id).put("type", if (type == "series") "series" else "movie")
+            .put("name", name).put("at", System.currentTimeMillis())
     }
 
     private fun get(url: String): JSONObject = JSONObject(request(url, null))
