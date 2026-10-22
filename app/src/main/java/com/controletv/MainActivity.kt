@@ -257,10 +257,12 @@ class MainActivity : Activity() {
         backFront = backdropView()
         backLayer.addView(backBack, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
         backLayer.addView(backFront, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
-        backLayer.addView(View(this).apply { setBackgroundColor(0x2607070C) }, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+        backLayer.addView(View(this).apply { setBackgroundColor(0x4D07070C) }, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
         backLayer.addView(View(this).apply {
-            background = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT, intArrayOf(0xF207070C.toInt(), 0xCC07070C.toInt(), 0x4D07070C, 0x0007070C))
-        }, FrameLayout.LayoutParams((screenW * 0.65f).toInt(), MATCH_PARENT, Gravity.START))
+            // Stays dark across the whole text column, so light pictures never wash out the details
+            background = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT,
+                intArrayOf(0xF507070C.toInt(), 0xEB07070C.toInt(), 0xCC07070C.toInt(), 0x8007070C.toInt(), 0x0007070C))
+        }, FrameLayout.LayoutParams((screenW * 0.8f).toInt(), MATCH_PARENT, Gravity.START))
         backLayer.addView(View(this).apply {
             background = GradientDrawable(GradientDrawable.Orientation.BOTTOM_TOP, intArrayOf(0xF207070C.toInt(), 0xB307070C.toInt(), 0x0007070C))
         }, FrameLayout.LayoutParams(MATCH_PARENT, (screenH * 0.5f).toInt(), Gravity.BOTTOM))
@@ -406,12 +408,16 @@ class MainActivity : Activity() {
         }
         hero.addView(heroAwards, LinearLayout.LayoutParams(u(48f), WRAP_CONTENT).apply { topMargin = u(0.7f) })
         // The synopsis is always shown whole (long ones get a slightly smaller font, see applyHero)
-        heroDesc = text(1.3f, 0xDDF2F2F7.toInt()).apply { setLineSpacing(0f, 1.12f) }
+        heroDesc = text(1.3f, 0xF2F2F2F7.toInt()).apply { setLineSpacing(0f, 1.12f) }
         hero.addView(heroDesc, LinearLayout.LayoutParams(u(54f), WRAP_CONTENT).apply { topMargin = u(0.8f) })
-        heroCredits = text(1.0f, MUTED).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
+        heroCredits = text(1.0f, 0xCCF2F2F7.toInt()).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
         hero.addView(heroCredits, LinearLayout.LayoutParams(u(44f), WRAP_CONTENT).apply { topMargin = u(0.7f) })
         heroHint = text(1.05f, CYAN).apply { visibility = View.GONE }
         hero.addView(heroHint, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { topMargin = u(0.9f) })
+        // A dark shadow under every line of the details, readable even over white
+        listOf(heroTitle, heroImdb, heroMeta, heroAwards, heroDesc, heroCredits, heroHint).forEach {
+            it.setShadowLayer(u(0.45f).toFloat(), 0f, u(0.08f).toFloat(), 0xF2000000.toInt())
+        }
         heroBox.addView(hero, FrameLayout.LayoutParams(u(60f), MATCH_PARENT, Gravity.START))
         column.addView(heroBox, LinearLayout.LayoutParams(MATCH_PARENT, 0, 1f))
 
