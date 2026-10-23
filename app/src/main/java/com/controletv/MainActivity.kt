@@ -247,7 +247,13 @@ class MainActivity : Activity() {
                 val controls = MediaListener.current(this)?.transportControls
                 when (event.keyCode) {
                     KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_BACK, KeyEvent.KEYCODE_DPAD_UP -> exitClipFull()
-                    KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> {
+                    KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> run {
+                        val id = clip?.clipId
+                        if (event.keyCode != KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE && id != null && YouTube.smartTube(this) != null) {
+                            exitClipFull()
+                            watchClipInSmartTube(id)
+                            return@run
+                        }
                         val c = MediaListener.current(this)
                         if (c?.playbackState?.state == PlaybackState.STATE_PLAYING) controls?.pause() else controls?.play()
                     }
@@ -264,8 +270,14 @@ class MainActivity : Activity() {
             if (event.keyCode == KeyEvent.KEYCODE_DPAD_UP && focus?.parent === topRow && headerShown && !isProjector &&
                 MediaListener.current(this)?.playbackState?.state == PlaybackState.STATE_PLAYING
             ) {
-                // The clip can't always be shown outside YouTube: then AuraMusic's own player (video mode)
-                if (clip?.showing == true) enterClipFull() else openMusicApp()
+                // The clip with its sound in SmartTube, from where the song is; without SmartTube,
+                // the silent clip full screen here, or AuraMusic's own player
+                val id = clip?.clipId
+                when {
+                    id != null && YouTube.smartTube(this) != null -> watchClipInSmartTube(id)
+                    clip?.showing == true -> enterClipFull()
+                    else -> openMusicApp()
+                }
                 return true
             }
             if (event.keyCode == KeyEvent.KEYCODE_DPAD_UP && focus != null && inRows(focus) && rowOf(focus) === rows.getChildAt(0)) {
@@ -1760,6 +1772,18 @@ class MainActivity : Activity() {
             addState(intArrayOf(), rounded(if (primary) 0xCCF2F2F7.toInt() else Color.TRANSPARENT, size / 2f, if (primary) Color.TRANSPARENT else LINE))
         }
         setOnClickListener { onClick() }
+    }
+
+    /** Hands the song over to its clip: AuraMusic pauses, SmartTube plays the clip from the same point. */
+    private fun watchClipInSmartTube(videoId: String) {
+        val controller = MediaListener.current(this)
+        val state = controller?.playbackState
+        val position = if (state == null) 0L else state.position +
+            if (state.state == PlaybackState.STATE_PLAYING) ((android.os.SystemClock.elapsedRealtime() - state.lastPositionUpdateTime) * state.playbackSpeed).toLong() else 0
+        controller?.transportControls?.pause()
+        runCatching { YouTube.open(this, videoId, position / 1000) }
+            .onSuccess { toast("Clipe no SmartTube") }
+            .onFailure { controller?.transportControls?.play(); toast(it.message ?: "Não abriu o SmartTube") }
     }
 
     private fun enterClipFull() {

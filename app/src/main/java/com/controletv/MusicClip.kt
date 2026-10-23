@@ -28,6 +28,10 @@ class MusicClip(private val context: Context, private val onReady: (Boolean) -> 
     private var lastSync = 0L
     private var stoppedAt = 0L
 
+    /** The song's official clip, found even when it can't be shown here (to open it in SmartTube). */
+    val clipId: String?
+        get() = if (showing) candidates.getOrNull(tried) else candidates.firstOrNull()
+
     /** True while a clip is on screen (loaded and playing). */
     var showing = false
         private set
