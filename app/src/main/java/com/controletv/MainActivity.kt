@@ -91,6 +91,13 @@ class MainActivity : Activity() {
     private var welcomeUrl: String? = null
     private var headerShown = true
     private lateinit var backLayer: FrameLayout
+    // Music video of the song playing, behind the welcome screen (up from the top: full screen)
+    private var clip: MusicClip? = null
+    private lateinit var clipHolder: FrameLayout
+    private lateinit var clipCaption: TextView
+    private lateinit var topRow: LinearLayout
+    private lateinit var column: LinearLayout
+    private var clipFull = false
     private var headerAnim: ValueAnimator? = null
     private lateinit var phoneChip: ImageView
     private lateinit var adbChip: ImageView
@@ -206,10 +213,15 @@ class MainActivity : Activity() {
     override fun onPause() {
         visible = false
         handler.removeCallbacks(tick)
+        // Another app on screen: the clip pauses (it resumes on the next tick here)
+        updateClip(MediaListener.current(this).takeIf { MediaListener.enabled(this) })
+        if (clipFull) exitClipFull()
         super.onPause()
     }
 
     override fun onDestroy() {
+        clip?.destroy()
+        clipFullscreen = false
         unregisterReceiver(packages)
         loader.shutdownNow()
         super.onDestroy()
@@ -229,8 +241,33 @@ class MainActivity : Activity() {
 
     /** Up from the first row lands on the current tab, down from a tab on the first card. */
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        // Full-screen music video: down/back return; OK pauses; left/right change the song
+        if (clipFull) {
+            if (event.action == KeyEvent.ACTION_DOWN) {
+                val controls = MediaListener.current(this)?.transportControls
+                when (event.keyCode) {
+                    KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_BACK, KeyEvent.KEYCODE_DPAD_UP -> exitClipFull()
+                    KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> {
+                        val c = MediaListener.current(this)
+                        if (c?.playbackState?.state == PlaybackState.STATE_PLAYING) controls?.pause() else controls?.play()
+                    }
+                    KeyEvent.KEYCODE_DPAD_LEFT -> controls?.skipToPrevious()
+                    KeyEvent.KEYCODE_DPAD_RIGHT -> controls?.skipToNext()
+                    else -> return super.dispatchKeyEvent(event)
+                }
+            }
+            return true
+        }
         if (event.action == KeyEvent.ACTION_DOWN) {
             val focus = currentFocus
+            // Up from the top row (search, Wi-Fi) while a clip plays: the clip alone, full screen
+            if (event.keyCode == KeyEvent.KEYCODE_DPAD_UP && focus?.parent === topRow && headerShown && !isProjector &&
+                MediaListener.current(this)?.playbackState?.state == PlaybackState.STATE_PLAYING
+            ) {
+                // The clip can't always be shown outside YouTube: then AuraMusic's own player (video mode)
+                if (clip?.showing == true) enterClipFull() else openMusicApp()
+                return true
+            }
             if (event.keyCode == KeyEvent.KEYCODE_DPAD_UP && focus != null && inRows(focus) && rowOf(focus) === rows.getChildAt(0)) {
                 tabViews[tab]?.requestFocus()
                 return true
@@ -251,7 +288,11 @@ class MainActivity : Activity() {
         // A column of bands that never overlap: the welcome screen (search, status, greeting,
         // music), which fills the screen on the menu and folds away while browsing; the tabs;
         // the focused title's hero; the rows
-        val column = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        column = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+
+        // ---- Music video behind everything (see MusicClip); filled in when a song plays
+        clipHolder = FrameLayout(this)
+        root.addView(clipHolder, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
 
         // ---- Full-screen picture of the focused title, behind everything while browsing:
         // darker on the left for the details, at the bottom for the rows and at the top for the tabs
@@ -292,7 +333,7 @@ class MainActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             setPadding(u(3.5f), (screenH * 0.03f).toInt(), u(3.5f), 0)
         }
-        val topRow = LinearLayout(this).apply {
+        topRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
@@ -442,6 +483,15 @@ class MainActivity : Activity() {
         column.addView(rowsScroll, LinearLayout.LayoutParams(MATCH_PARENT, (screenH * 0.39f).toInt()).apply { topMargin = u(0.4f) })
         root.addView(column, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
 
+        // Song name over the full-screen clip, for a few seconds
+        clipCaption = text(1.6f, TEXT, bold = true).apply {
+            alpha = 0f
+            setShadowLayer(u(0.6f).toFloat(), 0f, 0f, 0xEE000000.toInt())
+        }
+        root.addView(clipCaption, FrameLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT, Gravity.BOTTOM or Gravity.START).apply {
+            leftMargin = u(4f); bottomMargin = u(3.5f)
+        })
+
         // The top folds away while browsing the rows and comes back on the menu
         root.viewTreeObserver.addOnGlobalFocusChangeListener { _, now ->
             if (now != null && !rebuilding) showHeader(!inRows(now))
@@ -578,6 +628,7 @@ class MainActivity : Activity() {
             start()
         }
         header.animate().alpha(if (show) 1f else 0f).setDuration(260).start()
+        clipHolder.animate().alpha(if (show) 1f else 0f).setDuration(320).start()
         // The title's full-screen picture only shows while browsing (the welcome screen has its own)
         backLayer.animate().alpha(if (show) 0f else 1f).setDuration(320).start()
     }
@@ -1711,8 +1762,59 @@ class MainActivity : Activity() {
         setOnClickListener { onClick() }
     }
 
+    private fun enterClipFull() {
+        clipFull = true
+        clipFullscreen = true
+        column.animate().alpha(0f).setDuration(400).start()
+        showClipCaption()
+    }
+
+    private fun exitClipFull() {
+        clipFull = false
+        clipFullscreen = false
+        column.animate().alpha(1f).setDuration(300).start()
+        clipCaption.animate().cancel()
+        clipCaption.alpha = 0f
+    }
+
+    private fun showClipCaption() {
+        val meta = MediaListener.current(this)?.metadata ?: return
+        val title = meta.getString(MediaMetadata.METADATA_KEY_TITLE).orEmpty()
+        val artist = meta.getString(MediaMetadata.METADATA_KEY_ARTIST).orEmpty()
+        clipCaption.text = listOf(title, artist).filter { it.isNotEmpty() }.joinToString("  ·  ")
+        clipCaption.animate().cancel()
+        clipCaption.alpha = 1f
+        clipCaption.animate().alpha(0f).setStartDelay(5_000).setDuration(800).start()
+    }
+
+    /** The clip follows the song: what it is, where it is, whether it's playing and on screen. */
+    private fun updateClip(controller: android.media.session.MediaController?) {
+        val meta = controller?.metadata
+        val state = controller?.playbackState
+        if (meta == null || state == null) { clip?.stop(); return }
+        val player = clip ?: MusicClip(this) { ready ->
+            // The clip replaces the welcome picture; if it stops, the picture comes back
+            welcomeBack.animate().alpha(if (ready || welcomeUrl == null) 0f else 0.55f).setDuration(600).start()
+            if (!ready && clipFull) exitClipFull()
+        }.also {
+            clip = it
+            clipHolder.addView(it.view, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+        }
+        val playing = state.state == PlaybackState.STATE_PLAYING
+        val position = state.position + if (playing) ((android.os.SystemClock.elapsedRealtime() - state.lastPositionUpdateTime) * state.playbackSpeed).toLong() else 0
+        val title = meta.getString(MediaMetadata.METADATA_KEY_TITLE)
+        val key = "${meta.getString(MediaMetadata.METADATA_KEY_ARTIST)}|$title"
+        if (clipFull && key != lastClipSong) showClipCaption()
+        lastClipSong = key
+        player.update(title, meta.getString(MediaMetadata.METADATA_KEY_ARTIST), playing, position,
+            meta.getLong(MediaMetadata.METADATA_KEY_DURATION), visible = headerShown && visible)
+    }
+
+    private var lastClipSong = ""
+
     private fun updateMusic() {
         if (isProjector) return updateProjector()
+        updateClip(if (MediaListener.enabled(this)) MediaListener.current(this) else null)
         if (!MediaListener.enabled(this)) {
             // Turn the widget on by itself as soon as the phone's ADB connection allows it
             if (!askedMusicPermission && Adb.state == Adb.State.OK) {
@@ -1943,6 +2045,11 @@ class MainActivity : Activity() {
         /** Whether the home is on screen (music search brings it back afterwards). */
         @Volatile
         var visible = false
+            private set
+
+        /** A music video full screen on the home: the screensaver must not start over it. */
+        @Volatile
+        var clipFullscreen = false
             private set
 
         /** App artwork, kept in memory so going back home never reloads it. */

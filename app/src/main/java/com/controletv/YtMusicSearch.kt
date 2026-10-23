@@ -13,15 +13,21 @@ object YtMusicSearch {
     data class Song(val videoId: String, val title: String, val subtitle: String, val thumbnail: String?)
 
     private const val URL_SEARCH = "https://music.youtube.com/youtubei/v1/search?prettyPrint=false"
-    // The "Songs" filter of YouTube Music's search
+    // The "Songs" and "Videos" filters of YouTube Music's search
     private const val SONGS_FILTER = "EgWKAQIIAWoKEAkQBRAKEAMQBA%3D%3D"
+    private const val VIDEOS_FILTER = "EgWKAQIQAWoKEAkQChAFEAMQBA%3D%3D"
 
-    fun songs(query: String, limit: Int = 6): List<Song> {
+    fun songs(query: String, limit: Int = 6): List<Song> = search(query, SONGS_FILTER, limit)
+
+    /** Music videos (subtitle: "Artist • views • length"), as AuraMusic's video mode looks them up. */
+    fun videos(query: String, limit: Int = 10): List<Song> = search(query, VIDEOS_FILTER, limit)
+
+    private fun search(query: String, filter: String, limit: Int): List<Song> {
         val body = JSONObject()
             .put("context", JSONObject().put("client", JSONObject()
                 .put("clientName", "WEB_REMIX").put("clientVersion", "1.20241023.01.00").put("hl", "pt").put("gl", "BR")))
             .put("query", query)
-            .put("params", SONGS_FILTER)
+            .put("params", filter)
         val conn = URL(URL_SEARCH).openConnection() as HttpURLConnection
         conn.requestMethod = "POST"
         conn.connectTimeout = 8_000
