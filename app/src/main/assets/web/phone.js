@@ -880,6 +880,7 @@ function settingsSheet() {
       <button class="sheet-btn" id="s-name">${icon('pencil')}Nome na saudação: <span id="s-name-value"></span></button>
       <button class="sheet-btn" id="s-saver">${icon('image')}Tela de descanso</button>
       <button class="sheet-btn" id="s-player">${icon('play')}Player de vídeo</button>
+      ${projector ? '' : `<button class="sheet-btn${s.musicClip !== false ? ' primary' : ''}" id="s-clip">${icon('music')}Clipe da música no fundo: ${s.musicClip !== false ? 'ligado' : 'desligado'}</button>`}
     </div>
 
     <h4>Atualização</h4>
@@ -906,6 +907,15 @@ function settingsSheet() {
     } catch (e) { toast(e.message, true); }
   });
   sheetButton(sheet, 's-player', playerSheet);
+  sheetButton(sheet, 's-clip', async () => {
+    const on = s.musicClip === false;
+    try {
+      await api('/api/settings', { musicClip: on });
+      toast(on ? 'Clipe no fundo ligado' : 'Clipe no fundo desligado (para cima ainda abre o clipe no SmartTube)');
+      await refreshStatus();
+      settingsSheet();
+    } catch (e) { toast(e.message, true); }
+  });
   sheetButton(sheet, 's-saver', screensaverSheet);
   sheetButton(sheet, 's-diag', diagnosticsSheet);
   const nameValue = sheet.querySelector('#s-name-value');

@@ -70,6 +70,7 @@ class ControlServer(
                     if (ScreenSaver.enabled(context)) HomeWatcher.enableForScreensaver(context)
                 }
                 if (body.has("homeName")) HomePrefs.setName(context, body.getString("homeName"))
+                if (body.has("musicClip")) MusicClip.setEnabled(context, body.getBoolean("musicClip"))
                 if (body.has("player")) PlayerActivity.setPreferred(context, body.optString("player").ifEmpty { null })
                 if (body.has("subtitleLanguage")) {
                     val language = body.getString("subtitleLanguage")
@@ -498,6 +499,7 @@ class ControlServer(
                 .put("folder", ScreenSaver.FOLDER)
                 .put("album", GooglePhotos.status(context)))
             .put("homeName", HomePrefs.name(context))
+            .put("musicClip", MusicClip.enabled(context))
             .put("airReceived", AirMouseReceiver.received)
             .put("airRejected", AirMouseReceiver.rejected)
             .put("pointerProblem", MouseCursor.problem)

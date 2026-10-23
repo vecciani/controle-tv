@@ -276,6 +276,8 @@ class MainActivity : Activity() {
                 when {
                     id != null && YouTube.smartTube(this) != null -> watchClipInSmartTube(id)
                     clip?.showing == true -> enterClipFull()
+                    // Background clip switched off (or still searching): find the clip now
+                    YouTube.smartTube(this) != null -> findClipAndWatch()
                     else -> openMusicApp()
                 }
                 return true
@@ -1786,6 +1788,17 @@ class MainActivity : Activity() {
             .onFailure { controller?.transportControls?.play(); toast(it.message ?: "Não abriu o SmartTube") }
     }
 
+    private fun findClipAndWatch() {
+        val meta = MediaListener.current(this)?.metadata ?: return openMusicApp()
+        val title = meta.getString(MediaMetadata.METADATA_KEY_TITLE).orEmpty()
+        val artist = meta.getString(MediaMetadata.METADATA_KEY_ARTIST).orEmpty()
+        toast("Procurando o clipe…")
+        loader.execute {
+            val id = MusicClip.auraMusicClips(title, artist) { q -> YtMusicSearch.videos(q) }.firstOrNull()
+            runOnUiThread { if (id != null) watchClipInSmartTube(id) else toast("Não achei o clipe dessa música") }
+        }
+    }
+
     private fun enterClipFull() {
         clipFull = true
         clipFullscreen = true
@@ -1815,14 +1828,18 @@ class MainActivity : Activity() {
     private fun updateClip(controller: android.media.session.MediaController?) {
         val meta = controller?.metadata
         val state = controller?.playbackState
-        if (meta == null || state == null) { clip?.stop(); return }
+        if (meta == null || state == null || !MusicClip.enabled(this)) { clip?.stop(); return }
         val player = clip ?: MusicClip(this) { ready ->
             // The clip replaces the welcome picture; if it stops, the picture comes back
             welcomeBack.animate().alpha(if (ready || welcomeUrl == null) 0f else 0.55f).setDuration(600).start()
             if (!ready && clipFull) exitClipFull()
         }.also {
             clip = it
-            clipHolder.addView(it.view, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+            // Small player scaled up to cover the screen (light stream, see MusicClip.PLAYER_W)
+            val scale = maxOf(screenW.toFloat() / MusicClip.PLAYER_W, screenH.toFloat() / MusicClip.PLAYER_H)
+            it.view.scaleX = scale
+            it.view.scaleY = scale
+            clipHolder.addView(it.view, FrameLayout.LayoutParams(MusicClip.PLAYER_W, MusicClip.PLAYER_H, Gravity.CENTER))
         }
         val playing = state.state == PlaybackState.STATE_PLAYING
         val position = state.position + if (playing) ((android.os.SystemClock.elapsedRealtime() - state.lastPositionUpdateTime) * state.playbackSpeed).toLong() else 0

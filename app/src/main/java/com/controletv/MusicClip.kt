@@ -156,6 +156,20 @@ class MusicClip(private val context: Context, private val onReady: (Boolean) -> 
 
     companion object {
         /**
+         * Played in a small 640x360 player blown up to the screen: YouTube then sends a light
+         * low-resolution stream (the clip sits behind dark gradients anyway), so the TV stays smooth.
+         */
+        const val PLAYER_W = 640
+        const val PLAYER_H = 360
+
+        /** The "clipe no fundo" switch (Ajustes do celular → Tela). */
+        fun enabled(context: Context) = context.getSharedPreferences("home", Context.MODE_PRIVATE).getBoolean("musicClip", true)
+
+        fun setEnabled(context: Context, on: Boolean) {
+            context.getSharedPreferences("home", Context.MODE_PRIVATE).edit().putBoolean("musicClip", on).apply()
+        }
+
+        /**
          * The clip AuraMusic's video mode would pick for this song, by the same rules: YouTube
          * Music's video search ("title artist official music video", then looser), lyric/live/
          * cover/remix/visualizer versions out, title and artist both matching, official channels
