@@ -231,6 +231,12 @@ class ControlServer(
                 ok()
             }
 
+            // A shared Google Photos album for the screensaver ("" removes it)
+            path == "/api/screensaver/album" && post -> {
+                GooglePhotos.setAlbum(context, body(session).optString("url"))
+                ok(GooglePhotos.status(context))
+            }
+
             path == "/api/screensaver/start" && post -> {
                 ScreenSaver.start(context)
                 ok()
@@ -489,7 +495,8 @@ class ControlServer(
                 .put("minutes", ScreenSaver.minutes(context))
                 .put("dim", ScreenSaver.dim(context).toDouble())
                 .put("photos", runCatching { ScreenSaver.photos().size }.getOrDefault(0))
-                .put("folder", ScreenSaver.FOLDER))
+                .put("folder", ScreenSaver.FOLDER)
+                .put("album", GooglePhotos.status(context)))
             .put("homeName", HomePrefs.name(context))
             .put("airReceived", AirMouseReceiver.received)
             .put("airRejected", AirMouseReceiver.rejected)

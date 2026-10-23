@@ -43,9 +43,10 @@ object ScreenSaver {
         touch()
     }
 
+    /** Photos sent from the phone plus the shared Google Photos album's. */
     fun photos(): List<File> =
         File(FOLDER).listFiles { f -> f.isFile && f.name.substringAfterLast('.').lowercase() in PHOTO_TYPES }
-            ?.sortedBy { it.name }.orEmpty()
+            ?.sortedBy { it.name }.orEmpty() + GooglePhotos.files()
 
     /** Called every few seconds by the background service. */
     fun check(context: Context) {

@@ -1039,11 +1039,39 @@ async function screensaverSheet() {
       ${native ? `<button class="sheet-btn" id="v-folder">${icon('folder')}Ver e apagar fotos</button>` : ''}
       <button class="sheet-btn" id="v-test">${icon('play')}Testar agora</button>
     </div>
+    <h4>Álbum do Google Fotos</h4>
+    <p class="body" id="v-album-state"></p>
+    <input class="name-input" id="v-album" autocomplete="off" inputmode="url" placeholder="Cole o link do álbum (photos.app.goo.gl/…)">
+    <div class="sheet-actions">
+      <button class="sheet-btn primary" id="v-album-save">${icon('image')}Usar este álbum</button>
+      <button class="sheet-btn" id="v-album-off" hidden>${icon('trash')}Parar de usar o álbum</button>
+    </div>
+    <p class="hint small">${icon('info')}No app Google Fotos: abra o álbum → <b>Compartilhar</b> → <b>Criar link</b> (ou Copiar link) e cole aqui. A TV confere o álbum a cada 6 horas: foto nova entra, foto apagada sai.</p>
     <p class="hint small" style="margin-top:12px">${icon('info')}Não entra enquanto um filme ou canal estiver na tela. Qualquer botão do controle sai do descanso.</p>`);
   const save = async (body, message) => {
     try { await api('/api/settings', body); toast(message); await refreshStatus(); screensaverSheet(); }
     catch (e) { toast(e.message, true); }
   };
+  // Shared Google Photos album
+  const album = saver.album || {};
+  const albumState = sheet.querySelector('#v-album-state');
+  sheet.querySelector('#v-album').value = album.url || '';
+  sheet.querySelector('#v-album-off').hidden = !album.url;
+  albumState.textContent = !album.url ? 'Nenhum álbum ligado.'
+    : album.syncing ? 'Baixando as fotos do álbum…'
+    : album.error ? `Problema no álbum: ${album.error}`
+    : `${album.photos} fotos do álbum na TV.`;
+  if (album.syncing) setTimeout(() => { if (sheet.isConnected) screensaverSheet(); }, 5000);
+  sheetButton(sheet, 'v-album-save', async () => {
+    const url = sheet.querySelector('#v-album').value.trim();
+    if (!url) { toast('Cole o link do álbum', true); return; }
+    try { await api('/api/screensaver/album', { url }); toast('Baixando as fotos do álbum…'); setTimeout(screensaverSheet, 1500); }
+    catch (e) { toast(e.message, true); }
+  });
+  sheetButton(sheet, 'v-album-off', async () => {
+    try { await api('/api/screensaver/album', { url: '' }); toast('Álbum desligado'); screensaverSheet(); }
+    catch (e) { toast(e.message, true); }
+  });
   sheetButton(sheet, 'v-toggle', () => save({ screensaver: !saver.enabled }, saver.enabled ? 'Tela de descanso desligada' : 'Tela de descanso ligada'));
   sheet.querySelector('#v-minutes').replaceChildren(...SAVER_MINUTES.map((m) => {
     const b = document.createElement('button');

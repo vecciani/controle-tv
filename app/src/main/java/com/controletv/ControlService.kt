@@ -30,6 +30,7 @@ class ControlService : Service() {
     override fun onCreate() {
         super.onCreate()
         RemoteImages.init(this)
+        GooglePhotos.init(this)
         startForeground(NOTIFICATION_ID, notification())
         server = ControlServer(this, Pairing(this)).also {
             it.start(NanoHTTPD.SOCKET_READ_TIMEOUT, false)
@@ -55,6 +56,8 @@ class ControlService : Service() {
                 try {
                     // Once a minute: this week's AI suggestions, if they're due (in its own thread: it takes a while)
                     if (loops++ % 6 == 0 && !AiWeekly.generating) Thread { AiWeekly.tick(this) }.start()
+                    // And the shared Google Photos album, every few hours
+                    if (loops % 6 == 1 && !GooglePhotos.syncing) Thread { GooglePhotos.tick(this) }.start()
                     // Projector / TV box: make ours the default home screen once ADB is there
                     if (!askedHome && Adb.state == Adb.State.OK) { askedHome = true; HomeWatcher.ensureRealHome(this, withAdb = true) }
                     if (ScreenSaver.enabled(this) && Adb.state == Adb.State.OK) {
