@@ -139,11 +139,15 @@ class MusicClip(private val context: Context, private val onReady: (Boolean) -> 
         /** YouTube player states: 1 = playing. */
         @JavascriptInterface
         fun state(value: Int) = main.post {
-            if (value == 1 && !showing && songKey.isNotEmpty()) {
+            if (value != 1 || showing || songKey.isEmpty()) return@post
+            // YouTube shows its title and buttons for the first seconds: appear after they've gone
+            val key = songKey
+            main.postDelayed({
+                if (showing || songKey != key) return@postDelayed
                 showing = true
                 web?.animate()?.alpha(1f)?.setDuration(900)?.start()
                 onReady(true)
-            }
+            }, 4_000)
         }
 
         /** The video can't be played here (embedding off, removed…): try the next one. */
@@ -234,9 +238,9 @@ class MusicClip(private val context: Context, private val onReady: (Boolean) -> 
             var player;
             function onYouTubeIframeAPIReady(){
               player=new YT.Player('p',{videoId:'$videoId',host:'https://www.youtube-nocookie.com',
-                playerVars:{autoplay:1,mute:1,controls:0,disablekb:1,fs:0,iv_load_policy:3,modestbranding:1,rel:0,playsinline:1,start:$startSec,loop:1,playlist:'$videoId'},
-                events:{onReady:function(e){e.target.mute();e.target.playVideo();},
-                  onStateChange:function(e){Clip.state(e.data)},onError:function(e){Clip.error(e.data)}}});
+                playerVars:{autoplay:1,mute:1,controls:0,disablekb:1,fs:0,iv_load_policy:3,modestbranding:1,rel:0,playsinline:1,cc_load_policy:0,start:$startSec,loop:1,playlist:'$videoId'},
+                events:{onReady:function(e){e.target.mute();try{e.target.unloadModule('captions');e.target.unloadModule('cc')}catch(x){}e.target.playVideo();},
+                  onStateChange:function(e){if(e.data==1){try{e.target.setOption('captions','track',{});e.target.unloadModule('captions')}catch(x){}}Clip.state(e.data)},onError:function(e){Clip.error(e.data)}}});
             }
             function seek(s){if(player&&player.seekTo)player.seekTo(s,true)}
             function play(){if(player&&player.playVideo)player.playVideo()}

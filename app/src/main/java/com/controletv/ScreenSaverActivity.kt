@@ -81,6 +81,8 @@ class ScreenSaverActivity : Activity() {
     private var pitch = 0.5f
     private var pop = 0f
     private val screenW by lazy { resources.displayMetrics.widthPixels }
+    private lateinit var clipHolder: FrameLayout
+    private var clip: MusicClip? = null
     private val screenH by lazy { resources.displayMetrics.heightPixels }
     private val lightSize by lazy { (screenW * 0.75f).toInt() }
 
@@ -95,6 +97,7 @@ class ScreenSaverActivity : Activity() {
             clock.text = SimpleDateFormat("HH:mm", Locale.getDefault()).format(now)
             date.text = SimpleDateFormat("EEEE, d 'de' MMMM", Locale("pt", "BR")).format(now).replaceFirstChar { it.uppercase() }
             updateMusic()
+            updateClip()
             handler.postDelayed(this, 1_000)
         }
     }
@@ -118,6 +121,9 @@ class ScreenSaverActivity : Activity() {
         stage.addView(back, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
         stage.addView(front, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
         root.addView(stage, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+        // The music video of the song playing, over the photos when it can be shown (see updateClip)
+        clipHolder = FrameLayout(this)
+        root.addView(clipHolder, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
 
         // Dark veil over the photos ("lower the brightness"); it lifts a little on each beat
         veil = View(this).apply { setBackgroundColor(Color.argb((ScreenSaver.dim(this@ScreenSaverActivity) * 255).toInt(), 0, 0, 0)) }
@@ -296,6 +302,7 @@ class ScreenSaverActivity : Activity() {
     }
 
     override fun onDestroy() {
+        clip?.destroy()
         motion.cancel()
         pulse?.stop()
         handler.removeCallbacksAndMessages(null)
@@ -428,6 +435,31 @@ class ScreenSaverActivity : Activity() {
     }
 
     // ---------- Music ----------
+
+    /**
+     * Music playing: its clip full screen, silent and in time with the song (the same one the
+     * home shows); the photos stay underneath and come back if the clip can't be shown.
+     */
+    private fun updateClip() {
+        val controller = MediaListener.current(this)
+        val meta = controller?.metadata
+        val state = controller?.playbackState
+        if (meta == null || state == null || !MusicClip.enabled(this)) { clip?.stop(); return }
+        val player = clip ?: MusicClip(this) { ready ->
+            stage.animate().alpha(if (ready) 0f else 1f).setDuration(800).start()
+        }.also {
+            clip = it
+            // Small player blown up to the screen: a light stream, as on the home
+            val scale = maxOf(screenW.toFloat() / MusicClip.PLAYER_W, screenH.toFloat() / MusicClip.PLAYER_H)
+            it.view.scaleX = scale
+            it.view.scaleY = scale
+            clipHolder.addView(it.view, FrameLayout.LayoutParams(MusicClip.PLAYER_W, MusicClip.PLAYER_H, Gravity.CENTER))
+        }
+        val playing = state.state == PlaybackState.STATE_PLAYING
+        val position = state.position + if (playing) ((android.os.SystemClock.elapsedRealtime() - state.lastPositionUpdateTime) * state.playbackSpeed).toLong() else 0
+        player.update(meta.getString(MediaMetadata.METADATA_KEY_TITLE), meta.getString(MediaMetadata.METADATA_KEY_ARTIST),
+            playing, position, meta.getLong(MediaMetadata.METADATA_KEY_DURATION), visible = true)
+    }
 
     private fun updateMusic() {
         val controller = MediaListener.current(this)
