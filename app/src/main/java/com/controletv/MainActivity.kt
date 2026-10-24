@@ -410,8 +410,15 @@ class MainActivity : Activity() {
         date = text(1.8f, 0xCCF2F2F7.toInt())
         welcome.addView(greeting)
         welcome.addView(date, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { topMargin = u(0.7f) })
-        welcome.addView(if (isProjector) buildProjectorWidget() else buildMusicWidget(),
-            LinearLayout.LayoutParams(u(46f), WRAP_CONTENT).apply { topMargin = u(2.6f) })
+        // Widgets: music (or the projector's brightness) and the weather side by side, then playlists
+        val widgets = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        widgets.addView(if (isProjector) buildProjectorWidget() else buildMusicWidget(), LinearLayout.LayoutParams(u(42f), WRAP_CONTENT))
+        widgets.addView(buildWeatherWidget(), LinearLayout.LayoutParams(u(22f), MATCH_PARENT).apply { leftMargin = u(1.4f) })
+        welcome.addView(widgets, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { topMargin = u(2.4f) })
+        if (!isProjector) welcome.addView(buildPlaylists(), LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = u(2f) })
         welcome.addView(View(this), LinearLayout.LayoutParams(0, 0, 1.3f))
         header.addView(welcome, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
         // Starts filling the screen; adjusted to the exact space once laid out (see fitWelcome)
@@ -1390,8 +1397,7 @@ class MainActivity : Activity() {
     /** Search in Stremio (titles listed right here), SmartTube and AuraMusic. */
     private inner class SearchDialog : Dialog(this@MainActivity) {
         private val results = LinearLayout(this@MainActivity).apply { orientation = LinearLayout.VERTICAL }
-        private val smartTube = listOf("com.teamsmart.videomanager.tv", "com.liskovsoft.smarttubetv.beta", "com.liskovsoft.smarttubetv")
-            .firstOrNull { pkg -> packageManager.getLaunchIntentForPackage(pkg) != null || packageManager.getLeanbackLaunchIntentForPackage(pkg) != null }
+        private val smartTube = YouTube.smartTube(this@MainActivity)
         private var pending: Runnable? = null
         private var query = ""
 
@@ -1740,6 +1746,110 @@ class MainActivity : Activity() {
         }
     }
 
+    // ---------- Weather and playlists (welcome screen) ----------
+
+    private lateinit var weatherIcon: ImageView
+    private lateinit var weatherTemp: TextView
+    private lateinit var weatherText: TextView
+    private lateinit var weatherRange: TextView
+    private lateinit var weatherBox: View
+    private var weatherAt = 0L
+
+    /** Glass card: icon, temperature, condition, today's range and the city. Information only. */
+    private fun buildWeatherWidget(): View {
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(u(1.4f), u(1.2f), u(1.4f), u(1.2f))
+            background = rounded(0x1CFFFFFF, u(1.2f).toFloat(), 0x14FFFFFF)
+            visibility = View.INVISIBLE
+        }
+        weatherIcon = ImageView(this)
+        box.addView(weatherIcon, LinearLayout.LayoutParams(u(4.2f), u(4.2f)))
+        val info = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(u(1.1f), 0, 0, 0) }
+        weatherTemp = text(2.6f, TEXT).apply { typeface = interSemibold }
+        weatherText = text(1.1f, 0xE6F4F4F8.toInt()).apply { typeface = interMedium; maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
+        weatherRange = text(0.95f, 0x99F4F4F8.toInt()).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
+        info.addView(weatherTemp)
+        info.addView(weatherText, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { topMargin = u(0.3f) })
+        info.addView(weatherRange, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { topMargin = u(0.2f) })
+        box.addView(info, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+        weatherBox = box
+        return box
+    }
+
+    /** Every 15 minutes (the service itself keeps the answer for 20). */
+    private fun updateWeather() {
+        if (!::weatherBox.isInitialized || System.currentTimeMillis() - weatherAt < 15 * 60_000L) return
+        weatherAt = System.currentTimeMillis()
+        loader.execute {
+            val now = Weather.now() ?: return@execute
+            runOnUiThread {
+                weatherIcon.setImageResource(now.icon)
+                weatherTemp.text = "${now.temp}°"
+                weatherText.text = now.label
+                weatherRange.text = listOf("Máx ${now.max}°", "Mín ${now.min}°", now.city).filter { it.isNotBlank() }.joinToString("  ·  ")
+                weatherBox.visibility = View.VISIBLE
+            }
+        }
+    }
+
+    /** "Playlists": moods that start one of YouTube Music's own playlists in the music app. */
+    private fun buildPlaylists(): View {
+        val column = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; clipChildren = false; clipToPadding = false }
+        column.addView(text(1.2f, 0xCCF4F4F8.toInt()).apply {
+            typeface = interSemibold
+            text = "Playlists"
+            compoundDrawablePadding = u(0.5f)
+            setCompoundDrawables(getDrawable(R.drawable.ic_m_list)!!.mutate().apply { setBounds(0, 0, u(1.4f), u(1.4f)) }, null, null, null)
+        })
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            clipChildren = false
+            clipToPadding = false
+            setPadding(u(0.2f), u(0.9f), u(0.2f), u(0.4f))
+        }
+        MusicPlaylists.MOODS.forEach { mood ->
+            row.addView(text(1.15f, TEXT).apply {
+                typeface = interMedium
+                text = mood.title
+                gravity = Gravity.CENTER
+                isFocusable = true
+                isFocusableInTouchMode = true
+                setPadding(u(1.5f), u(0.75f), u(1.5f), u(0.75f))
+                background = StateListDrawable().apply {
+                    addState(intArrayOf(android.R.attr.state_focused), rounded(Color.WHITE, u(3f).toFloat(), Color.WHITE))
+                    addState(intArrayOf(), rounded(0x1CFFFFFF, u(3f).toFloat(), 0x14FFFFFF))
+                }
+                setTextColor(android.content.res.ColorStateList(
+                    arrayOf(intArrayOf(android.R.attr.state_focused), intArrayOf()), intArrayOf(BG, TEXT),
+                ))
+                setOnClickListener { playMood(mood) }
+            }, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { rightMargin = u(0.8f) })
+        }
+        column.addView(HorizontalScrollView(this).apply {
+            isHorizontalScrollBarEnabled = false
+            clipChildren = false
+            clipToPadding = false
+            addView(row)
+        })
+        return column
+    }
+
+    private fun playMood(mood: MusicPlaylists.Mood) {
+        toast("Procurando uma playlist de ${mood.title}…")
+        loader.execute {
+            val result = runCatching {
+                val playlist = MusicPlaylists.playlist(mood)
+                MusicBridge.playPlaylist(this, playlist.id)
+                playlist.title
+            }
+            runOnUiThread {
+                result.onSuccess { toast("Tocando: $it") }.onFailure { toast(it.message ?: "Não tocou") }
+            }
+        }
+    }
+
     /** The welcome screen's music player: cover, title and artist, previous / play / next. */
     private fun buildMusicWidget(): View {
         musicBox = LinearLayout(this).apply {
@@ -1747,8 +1857,8 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER_VERTICAL
             setPadding(u(1.2f), u(1.2f), u(1.4f), u(1.2f))
             background = StateListDrawable().apply {
-                addState(intArrayOf(android.R.attr.state_focused), rounded(0x3322D3EE, u(1.2f).toFloat(), CYAN))
-                addState(intArrayOf(), rounded(0xCC12121D.toInt(), u(1.2f).toFloat(), VIOLET_DIM))
+                addState(intArrayOf(android.R.attr.state_focused), rounded(0x33FFFFFF, u(1.2f).toFloat(), 0x99FFFFFF.toInt()))
+                addState(intArrayOf(), rounded(0x1CFFFFFF, u(1.2f).toFloat(), 0x14FFFFFF))
             }
             // Focusable only while there are no buttons: then OK opens the music app
             setOnClickListener { openMusicApp() }
@@ -1760,6 +1870,9 @@ class MainActivity : Activity() {
             }
             clipToOutline = true
             setImageResource(R.drawable.ic_m_music)
+            // White like the other widgets' icons (album covers replace it when a song plays)
+            imageTintList = android.content.res.ColorStateList.valueOf(0xE6FFFFFF.toInt())
+            setPadding(u(1.4f), u(1.4f), u(1.4f), u(1.4f))
         }
         musicBox.addView(musicArt, LinearLayout.LayoutParams(u(8f), u(8f)))
         val info = LinearLayout(this).apply {
@@ -1907,7 +2020,16 @@ class MainActivity : Activity() {
         musicKey = key
         musicTitle.text = title
         musicArtist.text = artist
-        if (art != null) musicArt.setImageBitmap(art) else musicArt.setImageResource(R.drawable.ic_m_music)
+        if (art != null) {
+            // The album cover, as it is
+            musicArt.imageTintList = null
+            musicArt.setPadding(0, 0, 0, 0)
+            musicArt.setImageBitmap(art)
+        } else {
+            musicArt.imageTintList = android.content.res.ColorStateList.valueOf(0xE6FFFFFF.toInt())
+            musicArt.setPadding(u(1.4f), u(1.4f), u(1.4f), u(1.4f))
+            musicArt.setImageResource(R.drawable.ic_m_music)
+        }
         val controls = key.contains('|')
         musicControls.visibility = if (controls) View.VISIBLE else View.GONE
         musicBox.isFocusable = !controls
@@ -2012,6 +2134,7 @@ class MainActivity : Activity() {
 
         updateWifi()
         updateMusic()
+        updateWeather()
         if (Adb.state == Adb.State.OK) loader.execute { WatchNext.refresh() }
         refreshStremio()
         refreshYouTube()

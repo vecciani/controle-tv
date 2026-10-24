@@ -15,7 +15,7 @@ import java.io.ByteArrayOutputStream
 /**
  * Music on the TV, for the phone's "Música na TV" panel and the home widget: what's playing
  * (any app, through its media session), transport controls, and search that plays straight
- * away in the chosen music app: AuraMusic (songs) or SmartTube (the official clip, then a mix).
+ * away in the chosen music app: AuraMusic (songs) or SmartTube (the official clip, then related videos).
  */
 object MusicBridge {
     const val AURA = "com.auramusic.app"
@@ -104,8 +104,8 @@ object MusicBridge {
     }
 
     /**
-     * SmartTube: the song's official clip (picked like AuraMusic's video mode does), then a mix of
-     * similar songs. The list returned is of clips, so tapping one on the phone plays that clip.
+     * SmartTube: the song's official clip (picked like AuraMusic's video mode does); SmartTube
+     * goes on with related videos. The list returned is of clips, so tapping one on the phone plays that clip.
      */
     private fun searchSmartTube(context: Context, query: String, play: Boolean): List<YtMusicSearch.Song> {
         val smartTube = YouTube.smartTube(context) ?: throw IllegalStateException("Instale o SmartTube na TV")
@@ -119,14 +119,14 @@ object MusicBridge {
         val official = song?.let { s -> MusicClip.auraMusicClips(s.title, s.subtitle.substringBefore(" • ")) { YtMusicSearch.videos(it) } }.orEmpty()
         val videos = YtMusicSearch.videos(query)
         val first = official.firstOrNull() ?: videos.firstOrNull()?.videoId ?: throw IllegalStateException("Nada encontrado para \"$query\"")
-        YouTube.open(context, first, mix = true)
+        YouTube.open(context, first)
         return (videos.filter { it.videoId == first } + videos.filter { it.videoId != first }).take(8)
     }
 
     /** Starts a song in AuraMusic (or the music app) by its YouTube Music id; in SmartTube, that clip. */
     fun playSong(context: Context, videoId: String) {
         if (!Regex("[A-Za-z0-9_-]{11}").matches(videoId)) throw IllegalArgumentException("Música inválida")
-        if (useSmartTube(context)) return YouTube.open(context, videoId, mix = true)
+        if (useSmartTube(context)) return YouTube.open(context, videoId)
         val app = musicApp(context) ?: throw IllegalStateException("Instale o AuraMusic na TV")
         open(context, app, Uri.parse("https://music.youtube.com/watch?v=$videoId"), returnHome = true)
     }
@@ -136,6 +136,21 @@ object MusicBridge {
         context.startActivity(Intent(Intent.ACTION_VIEW, uri).setPackage(app).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         // If the home was on screen, bring it back while the music keeps playing
         if (returnHome && wasHome) main.postDelayed({ MainActivity.open(context) }, 4_000)
+    }
+
+    /**
+     * Plays a YouTube Music playlist: AuraMusic starts it as its queue right away; SmartTube shows
+     * the playlist to pick from.
+     */
+    fun playPlaylist(context: Context, playlistId: String) {
+        if (!Regex("[\\w-]{10,64}").matches(playlistId)) throw IllegalArgumentException("Playlist inválida")
+        if (useSmartTube(context)) {
+            val pkg = YouTube.smartTube(context) ?: throw IllegalStateException("Instale o SmartTube na TV")
+            open(context, pkg, Uri.parse("https://www.youtube.com/playlist?list=$playlistId"), returnHome = false)
+            return
+        }
+        val app = musicApp(context) ?: throw IllegalStateException("Instale o AuraMusic na TV")
+        open(context, app, Uri.parse("https://music.youtube.com/watch?list=$playlistId"), returnHome = true)
     }
 
     /** Opens the music app's search screen (from the home widget). */

@@ -46,7 +46,11 @@ object YouTube {
             .put("backdrop", "https://i.ytimg.com/vi/$id/maxresdefault.jpg")
     }
 
-    private val SMART_TUBE = listOf("com.teamsmart.videomanager.tv", "com.liskovsoft.smarttubetv.beta", "com.liskovsoft.smarttubetv")
+    // SmartTube's package names: current builds (stable, beta, F-Droid) first, then older ones
+    private val SMART_TUBE = listOf(
+        "org.smarttube.stable", "org.smarttube.beta", "app.smarttube", "app.smarttube.fdroid",
+        "com.teamsmart.videomanager.tv", "com.liskovsoft.smarttubetv.beta", "com.liskovsoft.smarttubetv",
+    )
 
     /** Goes up whenever the channel list changes, so the TV home reloads its rows. */
     @Volatile var changes = 0
@@ -122,19 +126,30 @@ object YouTube {
     }
 
     /** Opens the video in SmartTube (no ads); without SmartTube, in whatever plays YouTube links. */
-    /** [mix]: continue with YouTube's mix of similar songs after it, like a radio. */
-    fun open(context: Context, videoId: String, startSec: Long = 0, mix: Boolean = false) {
+    /**
+     * Plays the video straight away (SmartTube then goes on with related videos by itself;
+     * a mix link would open SmartTube's playlist grid instead of playing).
+     */
+    fun open(context: Context, videoId: String, startSec: Long = 0) {
         if (!Regex("[\\w-]{11}").matches(videoId)) throw IllegalArgumentException("Vídeo inválido")
-        val link = "https://www.youtube.com/watch?v=$videoId" + (if (startSec > 0) "&t=${startSec}s" else "") +
-            (if (mix) "&list=RD$videoId" else "")
+        val link = "https://www.youtube.com/watch?v=$videoId" + if (startSec > 0) "&t=${startSec}s" else ""
         val intent = Intent(Intent.ACTION_VIEW, Uri.parse(link)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         smartTube(context)?.let { intent.setPackage(it) }
         if (intent.resolveActivity(context.packageManager) == null) throw IllegalStateException("Instale o SmartTube na TV")
         context.startActivity(intent)
     }
 
-    fun smartTube(context: Context): String? = SMART_TUBE.firstOrNull { pkg ->
-        context.packageManager.getLaunchIntentForPackage(pkg) != null || context.packageManager.getLeanbackLaunchIntentForPackage(pkg) != null
+    /** The installed SmartTube, by its known names or, failing that, any app called SmartTube. */
+    fun smartTube(context: Context): String? {
+        val pm = context.packageManager
+        fun opens(pkg: String) = pm.getLaunchIntentForPackage(pkg) != null || pm.getLeanbackLaunchIntentForPackage(pkg) != null
+        SMART_TUBE.firstOrNull { opens(it) }?.let { return it }
+        return runCatching {
+            pm.getInstalledApplications(0).firstOrNull { app ->
+                (app.packageName.contains("smarttube", ignoreCase = true) || pm.getApplicationLabel(app).toString().contains("SmartTube", ignoreCase = true)) &&
+                    opens(app.packageName)
+            }?.packageName
+        }.getOrNull()
     }
 
     // ---------- Parsing (plain Kotlin, tested) ----------

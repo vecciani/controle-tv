@@ -19,10 +19,40 @@ object YtMusicSearch {
 
     fun songs(query: String, limit: Int = 6): List<Song> = search(query, SONGS_FILTER, limit)
 
+    // YouTube Music's own ("featured") playlists
+    private const val PLAYLISTS_FILTER = "EgeKAQQoADgBagwQDhAKEAMQBRAJEAQ%3D"
+
+    data class Playlist(val id: String, val title: String, val subtitle: String, val thumbnail: String?)
+
+    /** YouTube Music's official playlists for [query] ("músicas para relaxar"…). */
+    fun playlists(query: String, limit: Int = 5): List<Playlist> {
+        val rows = mutableListOf<JSONObject>()
+        collect(request(query, PLAYLISTS_FILTER), rows)
+        return rows.mapNotNull { row ->
+            val browseId = row.optJSONObject("navigationEndpoint")?.optJSONObject("browseEndpoint")?.optString("browseId")
+                ?.takeIf { it.startsWith("VL") } ?: return@mapNotNull null
+            val columns = row.optJSONArray("flexColumns") ?: return@mapNotNull null
+            fun column(i: Int): String {
+                val runs = columns.optJSONObject(i)?.optJSONObject("musicResponsiveListItemFlexColumnRenderer")
+                    ?.optJSONObject("text")?.optJSONArray("runs") ?: return ""
+                return List(runs.length()) { runs.getJSONObject(it).optString("text") }.joinToString("")
+            }
+            val thumbs = row.optJSONObject("thumbnail")?.optJSONObject("musicThumbnailRenderer")
+                ?.optJSONObject("thumbnail")?.optJSONArray("thumbnails")
+            Playlist(browseId.removePrefix("VL"), column(0), column(1), thumbs?.optJSONObject(thumbs.length() - 1)?.optString("url"))
+        }.distinctBy { it.id }.take(limit)
+    }
+
     /** Music videos (subtitle: "Artist • views • length"), as AuraMusic's video mode looks them up. */
     fun videos(query: String, limit: Int = 10): List<Song> = search(query, VIDEOS_FILTER, limit)
 
     private fun search(query: String, filter: String, limit: Int): List<Song> {
+        val rows = mutableListOf<JSONObject>()
+        collect(request(query, filter), rows)
+        return rows.mapNotNull { parse(it) }.distinctBy { it.videoId }.take(limit)
+    }
+
+    private fun request(query: String, filter: String): JSONObject {
         val body = JSONObject()
             .put("context", JSONObject().put("client", JSONObject()
                 .put("clientName", "WEB_REMIX").put("clientVersion", "1.20241023.01.00").put("hl", "pt").put("gl", "BR")))
@@ -37,12 +67,7 @@ object YtMusicSearch {
         conn.setRequestProperty("Origin", "https://music.youtube.com")
         conn.setRequestProperty("User-Agent", "Mozilla/5.0")
         conn.outputStream.use { it.write(body.toString().toByteArray()) }
-        val json = JSONObject(conn.inputStream.use { it.readBytes().decodeToString() })
-        conn.disconnect()
-
-        val rows = mutableListOf<JSONObject>()
-        collect(json, rows)
-        return rows.mapNotNull { parse(it) }.distinctBy { it.videoId }.take(limit)
+        return JSONObject(conn.inputStream.use { it.readBytes().decodeToString() }).also { conn.disconnect() }
     }
 
     /** Finds every song row anywhere in the response. */
