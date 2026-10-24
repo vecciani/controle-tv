@@ -9,7 +9,10 @@ import java.net.URL
  * current conditions and today's range from Open-Meteo (free, no account or key).
  */
 object Weather {
-    data class Now(val city: String, val temp: Int, val min: Int, val max: Int, val code: Int, val day: Boolean) {
+    /** One of the next days: weekday ("seg"), its weather and range. */
+    data class Day(val weekday: String, val code: Int, val min: Int, val max: Int)
+
+    data class Now(val city: String, val temp: Int, val min: Int, val max: Int, val code: Int, val day: Boolean, val next: List<Day>) {
         val label get() = label(code)
         val icon get() = icon(code, day)
     }
@@ -26,7 +29,7 @@ object Weather {
             val (city, lat, lon) = location()
             val json = JSONObject(get(
                 "https://api.open-meteo.com/v1/forecast?latitude=$lat&longitude=$lon" +
-                    "&current=temperature_2m,weather_code,is_day&daily=temperature_2m_max,temperature_2m_min&timezone=auto&forecast_days=1",
+                    "&current=temperature_2m,weather_code,is_day&daily=weather_code,temperature_2m_max,temperature_2m_min&timezone=auto&forecast_days=5",
             ))
             val current = json.getJSONObject("current")
             val daily = json.getJSONObject("daily")
@@ -37,6 +40,14 @@ object Weather {
                 max = Math.round(daily.getJSONArray("temperature_2m_max").getDouble(0)).toInt(),
                 code = current.getInt("weather_code"),
                 day = current.optInt("is_day", 1) == 1,
+                next = (1 until daily.getJSONArray("time").length()).map { i ->
+                    Day(
+                        weekday = weekday(daily.getJSONArray("time").getString(i)),
+                        code = daily.getJSONArray("weather_code").getInt(i),
+                        min = Math.round(daily.getJSONArray("temperature_2m_min").getDouble(i)).toInt(),
+                        max = Math.round(daily.getJSONArray("temperature_2m_max").getDouble(i)).toInt(),
+                    )
+                },
             )
         }.getOrNull()?.also { cached = it; cachedAt = System.currentTimeMillis() } ?: cached
     }
@@ -48,6 +59,12 @@ object Weather {
         if (json.optString("status") != "success") throw IllegalStateException("Sem localização")
         return Triple(json.optString("city"), json.getDouble("lat"), json.getDouble("lon")).also { place = it; placeAt = System.currentTimeMillis() }
     }
+
+    /** "2026-10-26" → "seg". */
+    fun weekday(date: String): String = runCatching {
+        val d = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).parse(date)!!
+        java.text.SimpleDateFormat("EEE", java.util.Locale("pt", "BR")).format(d).removeSuffix(".").lowercase()
+    }.getOrDefault("")
 
     /** WMO weather codes in Portuguese. */
     fun label(code: Int) = when (code) {

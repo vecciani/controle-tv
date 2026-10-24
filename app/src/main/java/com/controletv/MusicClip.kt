@@ -139,7 +139,17 @@ class MusicClip(private val context: Context, private val onReady: (Boolean) -> 
         /** YouTube player states: 1 = playing. */
         @JavascriptInterface
         fun state(value: Int) = main.post {
-            if (value != 1 || showing || songKey.isEmpty()) return@post
+            // Not playing (ended, paused, buffering at the start): YouTube draws its title, buttons
+            // or end screen over the picture, so the clip hides until it plays again
+            if (value != 1) {
+                if (showing && value != 3) {
+                    showing = false
+                    web?.animate()?.alpha(0f)?.setDuration(300)?.start()
+                    onReady(false)
+                }
+                return@post
+            }
+            if (showing || songKey.isEmpty()) return@post
             // YouTube shows its title and buttons for the first seconds: appear after they've gone
             val key = songKey
             main.postDelayed({
@@ -147,7 +157,7 @@ class MusicClip(private val context: Context, private val onReady: (Boolean) -> 
                 showing = true
                 web?.animate()?.alpha(1f)?.setDuration(900)?.start()
                 onReady(true)
-            }, 4_000)
+            }, 7_000)
         }
 
         /** The video can't be played here (embedding off, removed…): try the next one. */

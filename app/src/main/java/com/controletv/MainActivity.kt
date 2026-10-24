@@ -415,10 +415,29 @@ class MainActivity : Activity() {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        widgets.addView(if (isProjector) buildProjectorWidget() else buildMusicWidget(), LinearLayout.LayoutParams(u(42f), WRAP_CONTENT))
-        widgets.addView(buildWeatherWidget(), LinearLayout.LayoutParams(u(22f), MATCH_PARENT).apply { leftMargin = u(1.4f) })
+        // The weather card (taller, with the next days) sets the row's height; the other matches it
+        widgets.addView(if (isProjector) buildProjectorWidget() else buildMusicWidget(), LinearLayout.LayoutParams(u(42f), MATCH_PARENT))
+        widgets.addView(buildWeatherWidget(), LinearLayout.LayoutParams(u(26f), WRAP_CONTENT).apply { leftMargin = u(1.4f) })
         welcome.addView(widgets, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { topMargin = u(2.4f) })
         if (!isProjector) welcome.addView(buildPlaylists(), LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = u(2f) })
+        welcome.addView(text(1.2f, TEXT).apply {
+            typeface = interSemibold
+            text = "Não sei o que ver"
+            gravity = Gravity.CENTER_VERTICAL
+            isFocusable = true
+            isFocusableInTouchMode = true
+            compoundDrawablePadding = u(0.7f)
+            setCompoundDrawables(getDrawable(R.drawable.ic_tab_sparkles)!!.mutate().apply {
+                setColorFilter(0xFFFBBF24.toInt(), PorterDuff.Mode.SRC_IN)
+                setBounds(0, 0, u(1.5f), u(1.5f))
+            }, null, null, null)
+            setPadding(u(1.5f), u(0.8f), u(1.7f), u(0.8f))
+            background = StateListDrawable().apply {
+                addState(intArrayOf(android.R.attr.state_focused), rounded(0x40FBBF24, u(3f).toFloat(), 0xFFFBBF24.toInt()))
+                addState(intArrayOf(), rounded(0x1FFBBF24, u(3f).toFloat(), 0x40FBBF24))
+            }
+            setOnClickListener { DiscoverDialog().show() }
+        }, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { topMargin = u(1.6f) })
         welcome.addView(View(this), LinearLayout.LayoutParams(0, 0, 1.3f))
         header.addView(welcome, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
         // Starts filling the screen; adjusted to the exact space once laid out (see fitWelcome)
@@ -1395,6 +1414,189 @@ class MainActivity : Activity() {
     // ---------- Search ----------
 
     /** Search in Stremio (titles listed right here), SmartTube and AuraMusic. */
+    // ---------- "Não sei o que ver" on the TV (same choices as the phone's) ----------
+
+    private val DISCOVER_GROUPS = listOf(
+        Triple("type", "Tipo", listOf("movie" to "Filme", "series" to "Série")),
+        Triple("mood", "Clima", listOf("qualquer" to "Tanto faz", "rir" to "Rir", "leve" to "Leve", "tensao" to "Tensão",
+            "emocionar" to "Emocionar", "susto" to "Susto", "pensar" to "Pensar", "aventura" to "Aventura",
+            "romance" to "Romance", "misterio" to "Mistério", "crime" to "Crime", "animacao" to "Animação", "documentario" to "Documentário")),
+        Triple("time", "Tempo", listOf("curto" to "Até 1h40", "medio" to "Até 2h10", "qualquer" to "Tanto faz")),
+        Triple("with", "Com quem", listOf("sozinho" to "Sozinho", "casal" to "Casal", "familia" to "Família")),
+        Triple("era", "Época", listOf("qualquer" to "Tanto faz", "classico" to "Clássicos", "8090" to "Anos 80 e 90", "0015" to "2000 a 2015", "recente" to "Recentes")),
+        Triple("region", "De onde", listOf("qualquer" to "Qualquer lugar", "fora" to "Fora dos EUA", "asia" to "Ásia", "europa" to "Europa", "latam" to "América Latina", "brasil" to "Brasil")),
+    )
+
+    private inner class DiscoverDialog : Dialog(this@MainActivity, android.R.style.Theme_Black_NoTitleBar_Fullscreen) {
+        private val choice = mutableMapOf("type" to "movie", "mood" to "qualquer", "time" to "qualquer", "with" to "sozinho", "era" to "qualquer", "region" to "qualquer")
+        private val chips = mutableMapOf<String, MutableList<Pair<String, TextView>>>()
+        private val results = LinearLayout(this@MainActivity).apply {
+            orientation = LinearLayout.HORIZONTAL
+            clipChildren = false
+            clipToPadding = false
+            setPadding(u(1f), u(1.4f), u(1f), u(1.4f))
+        }
+        private val status = text(1.2f, 0xB3F4F4F8.toInt()).apply { typeface = interMedium }
+
+        init {
+            val root = LinearLayout(this@MainActivity).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(u(4f), u(2.6f), u(4f), u(2f))
+                setBackgroundColor(0xF507070C.toInt())
+                clipChildren = false
+                clipToPadding = false
+            }
+            root.addView(text(3f, TEXT).apply { typeface = interBold; text = "Não sei o que ver" })
+            root.addView(text(1.25f, 0xB3F4F4F8.toInt()).apply {
+                text = "Nada de óbvio: nota alta, pouca gente viu, e nada que você já tem"
+            }, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { topMargin = u(0.5f); bottomMargin = u(1.2f) })
+            DISCOVER_GROUPS.forEach { (key, label, options) ->
+                val line = LinearLayout(this@MainActivity).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    clipChildren = false
+                    clipToPadding = false
+                }
+                line.addView(text(1.1f, 0x99F4F4F8.toInt()).apply { typeface = interSemibold; text = label.uppercase(); letterSpacing = 0.08f },
+                    LinearLayout.LayoutParams(u(10f), WRAP_CONTENT))
+                options.forEach { (value, title) ->
+                    val chip = chip(title) { select(key, value) }
+                    chips.getOrPut(key) { mutableListOf() } += value to chip
+                    line.addView(chip, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { rightMargin = u(0.6f) })
+                }
+                root.addView(HorizontalScrollView(this@MainActivity).apply {
+                    isHorizontalScrollBarEnabled = false
+                    clipChildren = false
+                    clipToPadding = false
+                    addView(line)
+                }, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = u(0.5f) })
+            }
+            val actions = LinearLayout(this@MainActivity).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+            actions.addView(chip("Sortear", primary = true) { draw() }, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { rightMargin = u(0.8f) })
+            actions.addView(chip("Surpreenda-me") { surprise() }, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { rightMargin = u(1.6f) })
+            actions.addView(status)
+            root.addView(actions, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = u(1.4f) })
+            root.addView(HorizontalScrollView(this@MainActivity).apply {
+                isHorizontalScrollBarEnabled = false
+                clipChildren = false
+                clipToPadding = false
+                addView(results)
+            }, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+            setContentView(ScrollView(this@MainActivity).apply { isVerticalScrollBarEnabled = false; addView(root) })
+            chips.keys.forEach { paint(it) }
+        }
+
+        /** A pill: white when chosen; a light ring when the cursor is on it. */
+        private fun chip(title: String, primary: Boolean = false, onClick: () -> Unit) = text(1.2f, TEXT).apply {
+            typeface = interMedium
+            text = title
+            gravity = Gravity.CENTER
+            isFocusable = true
+            isFocusableInTouchMode = true
+            setPadding(u(1.4f), u(0.7f), u(1.4f), u(0.7f))
+            tag = primary
+            setOnClickListener { onClick() }
+            setOnFocusChangeListener { v, _ -> style(v as TextView, isSelected) }
+            style(this, false)
+        }
+
+        private fun style(chip: TextView, chosen: Boolean) {
+            val primary = chip.tag == true
+            val focused = chip.isFocused
+            val r = u(3f).toFloat()
+            chip.background = when {
+                chosen || primary -> rounded(if (primary) CYAN else Color.WHITE, r, if (focused) 0xFF7DE3F4.toInt() else Color.TRANSPARENT)
+                focused -> rounded(0x40FFFFFF, r, Color.WHITE)
+                else -> rounded(0x1CFFFFFF, r, 0x14FFFFFF)
+            }
+            if (focused && (chosen || primary)) (chip.background as GradientDrawable).setStroke(u(0.25f), 0xFF7DE3F4.toInt())
+            chip.setTextColor(if (chosen || primary) BG else TEXT)
+        }
+
+        private fun select(key: String, value: String) {
+            choice[key] = value
+            paint(key)
+        }
+
+        private fun paint(key: String) {
+            chips[key]?.forEach { (value, chip) ->
+                chip.isSelected = choice[key] == value
+                style(chip, chip.isSelected)
+            }
+        }
+
+        private fun surprise() {
+            DISCOVER_GROUPS.forEach { (key, _, options) ->
+                if (key in setOf("mood", "era", "region")) choice[key] = options.map { it.first }.filter { it != "qualquer" || key != "mood" }.random()
+            }
+            chips.keys.forEach { paint(it) }
+            draw()
+        }
+
+        private fun draw() {
+            status.text = "Garimpando joias…"
+            results.removeAllViews()
+            val c = Discover.Choice(
+                mood = choice["mood"]!!, time = choice["time"]!!, company = choice["with"]!!,
+                region = choice["region"]!!, type = choice["type"]!!, era = choice["era"]!!,
+            )
+            loader.execute {
+                val found = runCatching { Discover.suggest(this@MainActivity, c).let { a -> List(a.length()) { a.getJSONObject(it) } } }
+                runOnUiThread {
+                    if (!isShowing) return@runOnUiThread
+                    found.onFailure { status.text = it.message ?: "Não deu para sortear" }.onSuccess { list ->
+                        status.text = if (list.isEmpty()) "Nada com essas escolhas: afrouxe o tempo, a época ou o lugar" else "OK abre no Stremio"
+                        list.take(10).forEach { results.addView(resultCard(it)) }
+                        results.getChildAt(0)?.requestFocus()
+                    }
+                }
+            }
+        }
+
+        /** Poster, title and why, the way the TV rows show titles. */
+        private fun resultCard(item: JSONObject): View {
+            val w = u(12f)
+            val box = LinearLayout(this@MainActivity).apply {
+                orientation = LinearLayout.VERTICAL
+                isFocusable = true
+                isFocusableInTouchMode = true
+                clipChildren = false
+                clipToPadding = false
+            }
+            val art = FrameLayout(this@MainActivity).apply {
+                background = rounded(SURFACE, u(0.9f).toFloat(), LINE)
+                outlineProvider = object : ViewOutlineProvider() {
+                    override fun getOutline(view: View, outline: Outline) = outline.setRoundRect(0, 0, view.width, view.height, u(0.9f).toFloat())
+                }
+                clipToOutline = true
+            }
+            val image = ImageView(this@MainActivity).apply { scaleType = ImageView.ScaleType.CENTER_CROP }
+            art.addView(image, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+            val sheen = focusSheen()
+            art.addView(sheen, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+            RemoteImages.load(item.optString("poster").ifEmpty { "https://images.metahub.space/poster/medium/${item.optString("id")}/img" }, image, w)
+            box.addView(art, LinearLayout.LayoutParams(w, w * 3 / 2))
+            box.addView(text(1.15f, TEXT).apply {
+                typeface = interSemibold
+                text = item.optString("name")
+                maxLines = 1
+                ellipsize = TextUtils.TruncateAt.END
+            }, LinearLayout.LayoutParams(w, WRAP_CONTENT).apply { topMargin = u(0.9f) })
+            box.addView(text(0.95f, 0xFFFBBF24.toInt()).apply {
+                text = item.optString("why")
+                maxLines = 2
+                ellipsize = TextUtils.TruncateAt.END
+            }, LinearLayout.LayoutParams(w, WRAP_CONTENT).apply { topMargin = u(0.3f) })
+            box.layoutParams = LinearLayout.LayoutParams(w, WRAP_CONTENT).apply { rightMargin = u(1.6f) }
+            box.setOnFocusChangeListener { _, focused -> liftOnFocus(art, sheen, focused) }
+            box.setOnClickListener {
+                dismiss()
+                openInStremio(item, null)
+            }
+            return box
+        }
+    }
+
     private inner class SearchDialog : Dialog(this@MainActivity) {
         private val results = LinearLayout(this@MainActivity).apply { orientation = LinearLayout.VERTICAL }
         private val smartTube = YouTube.smartTube(this@MainActivity)
@@ -1753,17 +1955,25 @@ class MainActivity : Activity() {
     private lateinit var weatherText: TextView
     private lateinit var weatherRange: TextView
     private lateinit var weatherBox: View
+    private lateinit var weatherDays: LinearLayout
     private var weatherAt = 0L
 
-    /** Glass card: icon, temperature, condition, today's range and the city. Information only. */
+    /** Glass card: now (icon, temperature, condition, range, city) and the next days. Information only. */
     private fun buildWeatherWidget(): View {
-        val box = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
+        val card = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(u(1.4f), u(1.2f), u(1.4f), u(1.2f))
+            setPadding(u(1.4f), u(1.1f), u(1.4f), u(1.1f))
             background = rounded(0x1CFFFFFF, u(1.2f).toFloat(), 0x14FFFFFF)
             visibility = View.INVISIBLE
         }
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        card.addView(box)
+        weatherDays = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        card.addView(weatherDays, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = u(0.9f) })
         weatherIcon = ImageView(this)
         box.addView(weatherIcon, LinearLayout.LayoutParams(u(4.2f), u(4.2f)))
         val info = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(u(1.1f), 0, 0, 0) }
@@ -1774,8 +1984,29 @@ class MainActivity : Activity() {
         info.addView(weatherText, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { topMargin = u(0.3f) })
         info.addView(weatherRange, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { topMargin = u(0.2f) })
         box.addView(info, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
-        weatherBox = box
-        return box
+        weatherBox = card
+        return card
+    }
+
+    /** One small column per next day: "seg", icon, "15° 7°". */
+    private fun showWeatherDays(days: List<Weather.Day>) {
+        weatherDays.removeAllViews()
+        days.take(4).forEach { d ->
+            val col = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER_HORIZONTAL
+            }
+            col.addView(text(0.95f, 0xB3F4F4F8.toInt()).apply { typeface = interMedium; text = d.weekday })
+            col.addView(ImageView(this).apply { setImageResource(Weather.icon(d.code, true)) },
+                LinearLayout.LayoutParams(u(1.9f), u(1.9f)).apply { topMargin = u(0.3f); bottomMargin = u(0.3f) })
+            col.addView(text(0.95f, TEXT).apply {
+                typeface = interMedium
+                text = SpannableString("${d.max}°  ${d.min}°").apply {
+                    setSpan(ForegroundColorSpan(0x80F4F4F8.toInt()), "${d.max}°  ".length, length, 0)
+                }
+            })
+            weatherDays.addView(col, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+        }
     }
 
     /** Every 15 minutes (the service itself keeps the answer for 20). */
@@ -1789,6 +2020,7 @@ class MainActivity : Activity() {
                 weatherTemp.text = "${now.temp}°"
                 weatherText.text = now.label
                 weatherRange.text = listOf("Máx ${now.max}°", "Mín ${now.min}°", now.city).filter { it.isNotBlank() }.joinToString("  ·  ")
+                showWeatherDays(now.next)
                 weatherBox.visibility = View.VISIBLE
             }
         }
