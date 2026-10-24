@@ -234,6 +234,25 @@ class ControlServer(
             }
 
             // A shared Google Photos album for the screensaver ("" removes it)
+            // One photo shared from a phone app (raw JPEG body, already at TV size)
+            path == "/api/screensaver/photo" && post -> {
+                val length = session.headers["content-length"]?.toIntOrNull() ?: throw IllegalArgumentException("Foto sem tamanho")
+                if (length > 15_000_000) throw IllegalArgumentException("Foto grande demais")
+                val bytes = ByteArray(length)
+                var read = 0
+                while (read < length) {
+                    val n = session.inputStream.read(bytes, read, length - read)
+                    if (n < 0) break
+                    read += n
+                }
+                ok(JSONObject().put("photos", ScreenSaver.saveShared(bytes.copyOf(read))))
+            }
+
+            path == "/api/screensaver/shared/clear" && post -> {
+                ScreenSaver.clearShared()
+                ok()
+            }
+
             path == "/api/screensaver/album" && post -> {
                 GooglePhotos.setAlbum(context, body(session).optString("url"))
                 ok(GooglePhotos.status(context))

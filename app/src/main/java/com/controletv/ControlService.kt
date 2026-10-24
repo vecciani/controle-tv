@@ -31,6 +31,7 @@ class ControlService : Service() {
         super.onCreate()
         RemoteImages.init(this)
         GooglePhotos.init(this)
+        ScreenSaver.init(this)
         startForeground(NOTIFICATION_ID, notification())
         server = ControlServer(this, Pairing(this)).also {
             it.start(NanoHTTPD.SOCKET_READ_TIMEOUT, false)

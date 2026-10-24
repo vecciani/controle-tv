@@ -43,10 +43,33 @@ object ScreenSaver {
         touch()
     }
 
-    /** Photos sent from the phone plus the shared Google Photos album's. */
+    /** Photos sent from the phone (both ways), plus the shared album's. */
     fun photos(): List<File> =
         File(FOLDER).listFiles { f -> f.isFile && f.name.substringAfterLast('.').lowercase() in PHOTO_TYPES }
-            ?.sortedBy { it.name }.orEmpty() + GooglePhotos.files()
+            ?.sortedBy { it.name }.orEmpty() + shared() + GooglePhotos.files()
+
+    // Photos shared from any phone app ("Compartilhar → Descanso da TV"), kept in the app's own
+    // storage so no storage permission or ADB is needed to save them
+    @Volatile private var sharedDir: File? = null
+
+    fun init(context: Context) {
+        if (sharedDir == null) sharedDir = File(context.filesDir, "saver").apply { mkdirs() }
+    }
+
+    private fun shared(): List<File> = sharedDir?.listFiles { f -> f.isFile && f.name.endsWith(".jpg") }?.sortedBy { it.name }.orEmpty()
+
+    /** Saves one photo sent by the phone (already JPEG at TV size); returns how many there are now. */
+    fun saveShared(bytes: ByteArray): Int {
+        val dir = sharedDir ?: throw IllegalStateException("Descanso ainda iniciando")
+        if (bytes.size < 1_000 || bytes[0] != 0xFF.toByte() || bytes[1] != 0xD8.toByte()) throw IllegalArgumentException("Foto inválida")
+        val name = java.security.MessageDigest.getInstance("SHA-1").digest(bytes).joinToString("") { "%02x".format(it) }.take(20)
+        File(dir, "$name.jpg").writeBytes(bytes)
+        return shared().size
+    }
+
+    fun clearShared() {
+        sharedDir?.listFiles()?.forEach { it.delete() }
+    }
 
     /** Called every few seconds by the background service. */
     fun check(context: Context) {
