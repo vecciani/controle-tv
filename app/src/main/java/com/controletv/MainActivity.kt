@@ -273,7 +273,10 @@ class MainActivity : Activity() {
                 // The clip with its sound in SmartTube, from where the song is; without SmartTube,
                 // the silent clip full screen here, or AuraMusic's own player
                 val id = clip?.clipId
+                val playingIn = MediaListener.current(this)?.packageName
                 when {
+                    // Already playing in SmartTube (in the background): back to its video
+                    playingIn != null && playingIn == YouTube.smartTube(this) -> Apps.launch(this, playingIn)
                     id != null && YouTube.smartTube(this) != null -> watchClipInSmartTube(id)
                     clip?.showing == true -> enterClipFull()
                     // Background clip switched off (or still searching): find the clip now
@@ -1428,7 +1431,7 @@ class MainActivity : Activity() {
                 }
             }
             if (MusicBridge.musicApp(this@MainActivity) != null && !isProjector) {
-                option("Tocar \"$text\" no AuraMusic") {
+                option("Tocar \"$text\" no ${MusicBridge.appName(this@MainActivity)}") {
                     // Searching goes over the network: off the main thread
                     Thread {
                         runCatching { MusicBridge.search(this@MainActivity, text, true) }
@@ -1868,7 +1871,7 @@ class MainActivity : Activity() {
         val controller = MediaListener.current(this)
         val meta = controller?.metadata
         if (controller == null || meta == null) {
-            showMusic("music:none", "Nada tocando", "OK abre o AuraMusic", null, false)
+            showMusic("music:none", "Nada tocando", "OK abre o ${MusicBridge.appName(this)}", null, false)
             return
         }
         val title = meta.getString(MediaMetadata.METADATA_KEY_TITLE) ?: "Música"
@@ -1892,7 +1895,8 @@ class MainActivity : Activity() {
 
     private fun openMusicApp() {
         val apps = Apps.list(this)
-        val music = apps.firstOrNull { it.pkg == MusicBridge.AURA }
+        val music = MusicBridge.musicApp(this)?.let { pkg -> apps.firstOrNull { it.pkg == pkg } }
+            ?: apps.firstOrNull { it.pkg == MusicBridge.AURA }
             ?: apps.firstOrNull { it.pkg == "com.apple.android.music" }
             ?: apps.firstOrNull { Folders.folderOf(this, it.pkg, it.label) == "musica" }
         if (music == null) toast("Nenhum app de música instalado") else Apps.launch(this, music.pkg)

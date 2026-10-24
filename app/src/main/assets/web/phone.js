@@ -880,6 +880,7 @@ function settingsSheet() {
       <button class="sheet-btn" id="s-name">${icon('pencil')}Nome na saudação: <span id="s-name-value"></span></button>
       <button class="sheet-btn" id="s-saver">${icon('image')}Tela de descanso</button>
       <button class="sheet-btn" id="s-player">${icon('play')}Player de vídeo</button>
+      ${projector ? '' : `<button class="sheet-btn" id="s-musicapp">${icon('music')}Música toca no: ${s.musicApp === 'smarttube' ? 'SmartTube' : 'AuraMusic'}</button>`}
       ${projector ? '' : `<button class="sheet-btn${s.musicClip !== false ? ' primary' : ''}" id="s-clip">${icon('music')}Clipe da música no fundo: ${s.musicClip !== false ? 'ligado' : 'desligado'}</button>`}
     </div>
 
@@ -907,6 +908,18 @@ function settingsSheet() {
     } catch (e) { toast(e.message, true); }
   });
   sheetButton(sheet, 's-player', playerSheet);
+  sheetButton(sheet, 's-musicapp', async () => {
+    const next = s.musicApp === 'smarttube' ? 'aura' : 'smarttube';
+    if (next === 'smarttube' && s.smartTube === false) { toast('Instale o SmartTube na TV primeiro', true); return; }
+    try {
+      await api('/api/settings', { musicApp: next });
+      toast(next === 'smarttube'
+        ? 'Música no SmartTube. Dica: no SmartTube, ligue "Reprodução em segundo plano: somente áudio"'
+        : 'Música no AuraMusic');
+      await refreshStatus();
+      settingsSheet();
+    } catch (e) { toast(e.message, true); }
+  });
   sheetButton(sheet, 's-clip', async () => {
     const on = s.musicClip === false;
     try {
@@ -1658,7 +1671,8 @@ async function refreshMusic() {
   $('music-app').textContent = playingSomething ? `Tocando na TV · ${music.appLabel}` : 'Música na TV';
   $('music-title').textContent = playingSomething ? music.title : 'Nada tocando';
   $('music-artist').textContent = playingSomething ? (music.artist || '') :
-    (!music.enabled ? 'Ative o controle completo para ver o que toca' : music.aura ? 'Pesquise abaixo para tocar no AuraMusic' : 'Instale o AuraMusic na TV para pesquisar');
+    (!music.enabled ? 'Ative o controle completo para ver o que toca' : music.aura ? `Pesquise abaixo para tocar no ${music.appName || 'AuraMusic'}` : 'Instale o AuraMusic ou o SmartTube na TV para pesquisar');
+  $('music-query').placeholder = `Tocar no ${music.appName || 'AuraMusic'}…`;
   $('music-controls').hidden = !playingSomething;
   $('music-progress').hidden = !playingSomething || !music.duration;
   $('music-play').innerHTML = icon(music.playing ? 'pause' : 'play');

@@ -122,9 +122,11 @@ object YouTube {
     }
 
     /** Opens the video in SmartTube (no ads); without SmartTube, in whatever plays YouTube links. */
-    fun open(context: Context, videoId: String, startSec: Long = 0) {
+    /** [mix]: continue with YouTube's mix of similar songs after it, like a radio. */
+    fun open(context: Context, videoId: String, startSec: Long = 0, mix: Boolean = false) {
         if (!Regex("[\\w-]{11}").matches(videoId)) throw IllegalArgumentException("Vídeo inválido")
-        val link = "https://www.youtube.com/watch?v=$videoId" + if (startSec > 0) "&t=${startSec}s" else ""
+        val link = "https://www.youtube.com/watch?v=$videoId" + (if (startSec > 0) "&t=${startSec}s" else "") +
+            (if (mix) "&list=RD$videoId" else "")
         val intent = Intent(Intent.ACTION_VIEW, Uri.parse(link)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         smartTube(context)?.let { intent.setPackage(it) }
         if (intent.resolveActivity(context.packageManager) == null) throw IllegalStateException("Instale o SmartTube na TV")
