@@ -708,3 +708,12 @@ input, textarea, .report { -webkit-user-select: text; user-select: text; -webkit
 /* A setting that is on, or the chosen option in a list: tinted, not a call to action */
 .sheet-btn.on { color: var(--text); background: var(--cyan-soft); border-color: rgba(34, 211, 238, .4); }
 .sheet-btn.on svg { color: var(--cyan); }
+
+/* Playlists of the TV home */
+.pl-icon { width: 42px; height: 42px; border-radius: 10px; display: grid; place-items: center; flex: none; background: var(--violet-soft); color: #C084FC; }
+.pl-icon svg { width: 20px; height: 20px; }
+.channel-row .round:disabled { opacity: .3; }
+.paste-row { display: flex; gap: 8px; align-items: center; margin-top: 10px; }
+.paste-row .name-input { margin: 0; flex: 1; min-width: 0; }
+.paste-row .pill { flex: none; width: 48px; height: 48px; padding: 0; }
+.paste-row + .sheet-actions { margin-top: 18px; }

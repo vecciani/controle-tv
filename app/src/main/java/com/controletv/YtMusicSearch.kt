@@ -19,15 +19,16 @@ object YtMusicSearch {
 
     fun songs(query: String, limit: Int = 6): List<Song> = search(query, SONGS_FILTER, limit)
 
-    // YouTube Music's own ("featured") playlists
+    // YouTube Music's own ("featured") playlists, and the community's
     private const val PLAYLISTS_FILTER = "EgeKAQQoADgBagwQDhAKEAMQBRAJEAQ%3D"
+    private const val COMMUNITY_PLAYLISTS_FILTER = "EgeKAQQoAEABagwQDhAKEAMQBRAJEAQ%3D"
 
     data class Playlist(val id: String, val title: String, val subtitle: String, val thumbnail: String?)
 
     /** YouTube Music's official playlists for [query] ("músicas para relaxar"…). */
-    fun playlists(query: String, limit: Int = 5): List<Playlist> {
+    fun playlists(query: String, limit: Int = 5, community: Boolean = false): List<Playlist> {
         val rows = mutableListOf<JSONObject>()
-        collect(request(query, PLAYLISTS_FILTER), rows)
+        collect(request(query, if (community) COMMUNITY_PLAYLISTS_FILTER else PLAYLISTS_FILTER), rows)
         return rows.mapNotNull { row ->
             val browseId = row.optJSONObject("navigationEndpoint")?.optJSONObject("browseEndpoint")?.optString("browseId")
                 ?.takeIf { it.startsWith("VL") } ?: return@mapNotNull null

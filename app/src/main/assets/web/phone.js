@@ -727,6 +727,89 @@ function devicesSheet() {
 
 $('device-switch').addEventListener('click', devicesSheet);
 
+// ---------- Playlists on the TV home: choose, order, search YouTube Music, paste a link ----------
+
+async function playlistsSheet() {
+  const sheet = openSheet(`
+    <div class="sheet-head"><div><h3>Playlists da tela inicial</h3><p>Aparecem na TV, embaixo da música. Toque nas setas para mudar a ordem.</p></div></div>
+    <div id="pl-list"><p class="hint">Carregando…</p></div>
+    <h4>Adicionar</h4>
+    <label class="search">${icon('search')}<input id="pl-query" type="search" placeholder="Pesquisar playlists (samba, worship, rock…)" autocomplete="off" enterkeyhint="search"></label>
+    <div id="pl-results"></div>
+    <div class="paste-row">
+      <input class="name-input" id="pl-link" autocomplete="off" inputmode="url" placeholder="ou cole o link de uma playlist sua">
+      <button class="pill" id="pl-paste">${icon('plus')}</button>
+    </div>
+    <div class="sheet-actions"><button class="sheet-btn" id="pl-done">${icon('check')}Pronto</button></div>`);
+  const listBox = sheet.querySelector('#pl-list');
+  const results = sheet.querySelector('#pl-results');
+  let list = [];
+  const save = async () => {
+    try { ({ playlists: list } = await api('/api/playlists', { playlists: list })); paint(); }
+    catch (e) { toast(e.message, true); }
+  };
+  const paint = () => {
+    if (!list.length) { listBox.replaceChildren(hintText('Nenhuma playlist: a fileira some da TV. Adicione abaixo.')); return; }
+    listBox.replaceChildren(...list.map((p, i) => {
+      const row = document.createElement('div');
+      row.className = 'channel-row';
+      row.innerHTML = `<span class="pl-icon">${icon('music')}</span><div><strong></strong><small></small></div>
+        <button class="round" aria-label="Subir"${i === 0 ? ' disabled' : ''}>${icon('up')}</button>
+        <button class="round" aria-label="Tirar">${icon('trash')}</button>`;
+      row.querySelector('strong').textContent = p.title;
+      row.querySelector('small').textContent = p.id ? 'Playlist escolhida' : 'Muda toda semana (YouTube Music)';
+      const [upBtn, delBtn] = row.querySelectorAll('button');
+      upBtn.onclick = () => { if (i > 0) { [list[i - 1], list[i]] = [list[i], list[i - 1]]; save(); } };
+      delBtn.onclick = () => { list.splice(i, 1); save(); };
+      return row;
+    }));
+  };
+  const add = (entry) => {
+    if (list.some((p) => (entry.id && p.id === entry.id) || p.title === entry.title)) { toast('Já está na lista'); return; }
+    list.push(entry);
+    save();
+    toast(`${entry.title} adicionada`);
+  };
+  try { ({ playlists: list } = await api('/api/playlists')); } catch (e) { toast(e.message, true); }
+  paint();
+
+  const input = sheet.querySelector('#pl-query');
+  let timer;
+  input.addEventListener('input', () => {
+    clearTimeout(timer);
+    const q = input.value.trim();
+    if (q.length < 2) { results.replaceChildren(); return; }
+    timer = setTimeout(async () => {
+      results.replaceChildren(hintText('Pesquisando…'));
+      try {
+        const { results: found } = await api(`/api/playlists/search?q=${encodeURIComponent(q)}`);
+        if (input.value.trim() !== q) return;
+        results.replaceChildren(...(found.length ? found.map((p) => {
+          const row = document.createElement('div');
+          row.className = 'channel-row';
+          row.innerHTML = `<img alt=""><div><strong></strong><small></small></div><button class="round" aria-label="Adicionar">${icon('plus')}</button>`;
+          if (p.thumb) row.querySelector('img').src = p.thumb;
+          row.querySelector('img').style.borderRadius = '10px';
+          row.querySelector('strong').textContent = p.title;
+          row.querySelector('small').textContent = p.subtitle || '';
+          row.querySelector('button').onclick = () => add({ title: p.title.slice(0, 40), id: p.id });
+          return row;
+        }) : [hintText('Nada encontrado')]));
+      } catch (e) { results.replaceChildren(hintText(e.message)); }
+    }, 450);
+  });
+  sheetButton(sheet, 'pl-paste', async () => {
+    const url = sheet.querySelector('#pl-link').value.trim();
+    if (!url) { toast('Cole o link da playlist', true); return; }
+    try {
+      const { id, title } = await api(`/api/playlists/link?url=${encodeURIComponent(url)}`);
+      add({ title: (title || 'Minha playlist').slice(0, 40), id });
+      sheet.querySelector('#pl-link').value = '';
+    } catch (e) { toast(e.message, true); }
+  });
+  sheetButton(sheet, 'pl-done', settingsSheet);
+}
+
 function sheetButton(sheet, id, handler) {
   sheet.querySelector(`#${id}`)?.addEventListener('click', handler);
 }
@@ -880,6 +963,7 @@ function settingsSheet() {
       <button class="sheet-btn" id="s-name">${icon('pencil')}Nome na saudação: <span id="s-name-value"></span></button>
       <button class="sheet-btn" id="s-saver">${icon('image')}Tela de descanso</button>
       <button class="sheet-btn" id="s-player">${icon('play')}Player de vídeo</button>
+      ${projector ? '' : `<button class="sheet-btn" id="s-playlists">${icon('music')}Playlists da tela inicial</button>`}
       ${projector ? '' : `<button class="sheet-btn" id="s-musicapp">${icon('music')}Música toca no: ${s.musicApp === 'smarttube' ? 'SmartTube' : 'AuraMusic'}</button>`}
       ${projector ? '' : `<button class="sheet-btn${s.musicClip !== false ? ' on' : ''}" id="s-clip">${icon('music')}Clipe da música no fundo: ${s.musicClip !== false ? 'ligado' : 'desligado'}</button>`}
     </div>
@@ -908,6 +992,7 @@ function settingsSheet() {
     } catch (e) { toast(e.message, true); }
   });
   sheetButton(sheet, 's-player', playerSheet);
+  sheetButton(sheet, 's-playlists', playlistsSheet);
   sheetButton(sheet, 's-musicapp', async () => {
     const next = s.musicApp === 'smarttube' ? 'aura' : 'smarttube';
     if (next === 'smarttube' && s.smartTube === false) { toast('Instale o SmartTube na TV primeiro', true); return; }

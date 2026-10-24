@@ -1809,7 +1809,26 @@ class MainActivity : Activity() {
             clipToPadding = false
             setPadding(u(0.2f), u(0.9f), u(0.2f), u(0.4f))
         }
-        MusicPlaylists.MOODS.forEach { mood ->
+        playlistRow = row
+        fillPlaylists()
+        column.addView(HorizontalScrollView(this).apply {
+            isHorizontalScrollBarEnabled = false
+            clipChildren = false
+            clipToPadding = false
+            addView(row)
+        })
+        return column
+    }
+
+    private var playlistRow: LinearLayout? = null
+    private var shownPlaylists = -1
+
+    /** The pills, from the list chosen on the phone (Ajustes → Playlists da tela inicial). */
+    private fun fillPlaylists() {
+        val row = playlistRow ?: return
+        shownPlaylists = MusicPlaylists.version
+        row.removeAllViews()
+        MusicPlaylists.saved(this).forEach { mood ->
             row.addView(text(1.15f, TEXT).apply {
                 typeface = interMedium
                 text = mood.title
@@ -1827,22 +1846,14 @@ class MainActivity : Activity() {
                 setOnClickListener { playMood(mood) }
             }, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { rightMargin = u(0.8f) })
         }
-        column.addView(HorizontalScrollView(this).apply {
-            isHorizontalScrollBarEnabled = false
-            clipChildren = false
-            clipToPadding = false
-            addView(row)
-        })
-        return column
     }
 
-    private fun playMood(mood: MusicPlaylists.Mood) {
-        toast("Procurando uma playlist de ${mood.title}…")
+    private fun playMood(mood: MusicPlaylists.Entry) {
+        toast("Abrindo ${mood.title}…")
         loader.execute {
             val result = runCatching {
-                val playlist = MusicPlaylists.playlist(mood)
-                MusicBridge.playPlaylist(this, playlist.id)
-                playlist.title
+                MusicBridge.playPlaylist(this, MusicPlaylists.playlistId(mood))
+                mood.title
             }
             runOnUiThread {
                 result.onSuccess { toast("Tocando: $it") }.onFailure { toast(it.message ?: "Não tocou") }
@@ -2135,6 +2146,7 @@ class MainActivity : Activity() {
         updateWifi()
         updateMusic()
         updateWeather()
+        if (MusicPlaylists.version != shownPlaylists && playlistRow != null) fillPlaylists()
         if (Adb.state == Adb.State.OK) loader.execute { WatchNext.refresh() }
         refreshStremio()
         refreshYouTube()

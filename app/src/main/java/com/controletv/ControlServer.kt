@@ -306,6 +306,23 @@ class ControlServer(
                 ok(AiWeekly.status(context))
             }
 
+            // The home's playlist shortcuts: list, save, search YouTube Music, read a pasted link
+            path == "/api/playlists" && !post -> ok(JSONObject().put("playlists", MusicPlaylists.json(context)))
+
+            path == "/api/playlists" && post -> {
+                MusicPlaylists.save(context, body(session).getJSONArray("playlists"))
+                ok(JSONObject().put("playlists", MusicPlaylists.json(context)))
+            }
+
+            path == "/api/playlists/search" ->
+                ok(JSONObject().put("results", MusicPlaylists.search(session.parameters["q"]?.firstOrNull().orEmpty())))
+
+            path == "/api/playlists/link" -> {
+                val id = MusicPlaylists.idFromLink(session.parameters["url"]?.firstOrNull().orEmpty())
+                    ?: throw IllegalArgumentException("Não achei uma playlist nesse link")
+                ok(JSONObject().put("id", id).put("title", MusicPlaylists.title(id) ?: "Minha playlist"))
+            }
+
             // "Não sei o que ver": hidden gems for a mood, time, company and place
             path == "/api/discover" -> {
                 fun p(name: String, default: String) = session.parameters[name]?.firstOrNull()?.ifEmpty { null } ?: default
