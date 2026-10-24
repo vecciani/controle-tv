@@ -954,6 +954,7 @@ function settingsSheet() {
     <div class="sheet-actions">
       ${s.adb !== 'ok' ? `<button class="sheet-btn primary" id="s-retry">${icon('refresh')}Tentar conectar de novo</button>` : ''}
       ${native ? `<button class="sheet-btn" id="s-forget">${icon('tv')}Trocar entre TV e projetor</button>` : ''}
+      ${native?.notificationRemote ? `<button class="sheet-btn${native.notificationRemote() ? ' on' : ''}" id="s-notif">${icon('gamepad')}Controle na notificação: ${native.notificationRemote() ? 'ligado' : 'desligado'}</button>` : ''}
       ${s.adb !== 'ok' && !native ? `<a class="sheet-btn primary" href="${PHONE_APP_URL}">${icon('download')}Baixar app do celular</a>` : ''}
     </div>
 
@@ -993,6 +994,12 @@ function settingsSheet() {
   });
   sheetButton(sheet, 's-player', playerSheet);
   sheetButton(sheet, 's-playlists', playlistsSheet);
+  sheetButton(sheet, 's-notif', () => {
+    const on = !native.notificationRemote();
+    native.setNotificationRemote(on);
+    toast(on ? 'Controle na barra de notificação ligado' : 'Controle na notificação desligado');
+    settingsSheet();
+  });
   sheetButton(sheet, 's-musicapp', async () => {
     const next = s.musicApp === 'smarttube' ? 'aura' : 'smarttube';
     if (next === 'smarttube' && s.smartTube === false) { toast('Instale o SmartTube na TV primeiro', true); return; }

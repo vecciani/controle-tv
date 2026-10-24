@@ -156,6 +156,7 @@ class PhoneActivity : Activity() {
                 override fun onPageFinished(view: WebView, url: String) {
                     finished = true
                     status.visibility = android.view.View.GONE
+                    showNotificationRemote()
                 }
 
                 override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
@@ -390,6 +391,16 @@ class PhoneActivity : Activity() {
         @JavascriptInterface
         fun hasGyroscope(): Boolean = (getSystemService(SENSOR_SERVICE) as android.hardware.SensorManager)
             .getDefaultSensor(android.hardware.Sensor.TYPE_GYROSCOPE) != null
+
+        /** The remote in the notification shade: on/off from the page's settings. */
+        @JavascriptInterface
+        fun notificationRemote(): Boolean = NotificationRemote.enabled(this@PhoneActivity)
+
+        @JavascriptInterface
+        fun setNotificationRemote(on: Boolean) {
+            NotificationRemote.setEnabled(this@PhoneActivity, on)
+            main.post { if (on) showNotificationRemote() else NotificationRemote.hide(this@PhoneActivity) }
+        }
 
         /** Back to the start screen (TV or Projetor). */
         @JavascriptInterface
@@ -720,6 +731,28 @@ class PhoneActivity : Activity() {
         }.start()
     }
 
+    /** Shows the notification remote for the device in use (asks for the permission once on Android 13+). */
+    private fun showNotificationRemote() {
+        if (!NotificationRemote.enabled(this)) return
+        if (android.os.Build.VERSION.SDK_INT >= 33 &&
+            checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            if (!prefs.getBoolean("askedNotif", false)) {
+                prefs.edit().putBoolean("askedNotif", true).apply()
+                requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), ASK_NOTIFICATIONS)
+            }
+            return
+        }
+        val role = prefs.getString("role", "tv")
+        NotificationRemote.show(this, if (role == "projetor") "Controlando o projetor" else "Controlando a TV")
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == ASK_NOTIFICATIONS) showNotificationRemote()
+    }
+
     private fun choose(role: Role, device: Hello) {
         prefs.edit().putString("host", device.ip).putString("ip_${role.id}", device.ip).putString("role", role.id).apply()
         showController(device.ip)
@@ -784,6 +817,7 @@ class PhoneActivity : Activity() {
         const val PICK_FILE = 2
         const val PICK_UPLOAD = 3
         const val PICK_PHOTOS = 4
+        const val ASK_NOTIFICATIONS = 5
         val BG = Color.parseColor("#07070C")
         val SURFACE = Color.parseColor("#12121D")
         val LINE = Color.parseColor("#2A2A3A")
