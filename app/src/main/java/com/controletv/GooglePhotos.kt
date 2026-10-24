@@ -7,10 +7,9 @@ import java.net.URL
 import java.security.MessageDigest
 
 /**
- * A shared Google Photos album as the screensaver's photos: the album's public link (Google
- * Photos → album → Compartilhar → Criar link) is read like a web page, its photos are saved on
- * the TV at screen size and kept in step with the album every few hours (new photos come in,
- * removed ones go). No Google account on the TV.
+ * A shared album as the screensaver's photos, from Google Photos (album → Compartilhar → Criar
+ * link) or Amazon Photos (see [AmazonPhotos]): its photos are saved on the TV at screen size and
+ * kept in step with the album every few hours (new photos come in, removed ones go). No account.
  */
 object GooglePhotos {
     private const val MAX_PHOTOS = 300
@@ -45,8 +44,8 @@ object GooglePhotos {
             files().forEach { it.delete() }
             return
         }
-        if (!Regex("^https://(photos\\.app\\.goo\\.gl|photos\\.google\\.com|goo\\.gl)/\\S+").matches(clean)) {
-            throw IllegalArgumentException("Cole o link de um álbum compartilhado do Google Fotos (photos.app.goo.gl/…)")
+        if (!Regex("^https://(photos\\.app\\.goo\\.gl|photos\\.google\\.com|goo\\.gl)/\\S+").matches(clean) && !AmazonPhotos.isLink(clean)) {
+            throw IllegalArgumentException("Cole o link de um álbum compartilhado do Google Fotos ou do Amazon Fotos")
         }
         prefs(context).edit().putString("url", clean).putLong("syncedAt", 0).remove("error").apply()
         Thread { sync(context) }.start()
@@ -66,7 +65,7 @@ object GooglePhotos {
         val folder = dir ?: return
         syncing = true
         try {
-            val photos = parseAlbum(fetch(url).decodeToString()).take(MAX_PHOTOS)
+            val photos = (if (AmazonPhotos.isLink(url)) AmazonPhotos.photos(url) else parseAlbum(fetch(url).decodeToString())).take(MAX_PHOTOS)
             if (photos.isEmpty()) throw IllegalStateException("Não achei fotos nesse link. Confira se o álbum está compartilhado por link.")
             val wanted = photos.associateBy { name(it.id) }
             for ((file, photo) in wanted) {
@@ -75,7 +74,8 @@ object GooglePhotos {
                 // Screen size: Google resizes it for us (fits inside 1920x1080)
                 runCatching {
                     val part = File(folder, "$file.part")
-                    part.writeBytes(fetch(photo.url + "=w1920-h1080"))
+                    // Google resizes with "=w1920-h1080"; Amazon's link already asks for TV size
+                    part.writeBytes(fetch(if (photo.url.contains("googleusercontent")) photo.url + "=w1920-h1080" else photo.url))
                     part.renameTo(target)
                 }
             }

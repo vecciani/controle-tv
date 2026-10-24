@@ -1154,14 +1154,14 @@ async function screensaverSheet() {
       ${native ? `<button class="sheet-btn" id="v-folder">${icon('folder')}Ver e apagar fotos</button>` : ''}
       <button class="sheet-btn" id="v-test">${icon('play')}Testar agora</button>
     </div>
-    <h4>Álbum do Google Fotos</h4>
+    <h4>Álbum do Google Fotos ou Amazon Fotos</h4>
     <p class="body" id="v-album-state"></p>
-    <input class="name-input" id="v-album" autocomplete="off" inputmode="url" placeholder="Cole o link do álbum (photos.app.goo.gl/…)">
+    <input class="name-input" id="v-album" autocomplete="off" inputmode="url" placeholder="Cole o link do álbum compartilhado">
     <div class="sheet-actions">
       <button class="sheet-btn primary" id="v-album-save">${icon('image')}Usar este álbum</button>
       <button class="sheet-btn" id="v-album-off" hidden>${icon('trash')}Parar de usar o álbum</button>
     </div>
-    <p class="hint small">${icon('info')}No app Google Fotos: abra o álbum → <b>Compartilhar</b> → <b>Criar link</b> (ou Copiar link) e cole aqui. A TV confere o álbum a cada 6 horas: foto nova entra, foto apagada sai.</p>
+    <p class="hint small">${icon('info')}<span><b>Google Fotos:</b> abra o álbum → Compartilhar → Criar link. <b>Amazon Fotos:</b> abra o álbum → Compartilhar → Copiar link. Cole aqui. A TV confere o álbum a cada 6 horas: foto nova entra, foto apagada sai.</span></p>
     <p class="hint small" style="margin-top:12px">${icon('info')}Não entra enquanto um filme ou canal estiver na tela. Qualquer botão do controle sai do descanso.</p>`);
   const save = async (body, message) => {
     try { await api('/api/settings', body); toast(message); await refreshStatus(); screensaverSheet(); }
