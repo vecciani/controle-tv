@@ -314,22 +314,26 @@ class MainActivity : Activity() {
         // ---- Full-screen picture of the focused title, behind everything while browsing:
         // darker on the left for the details, at the bottom for the rows and at the top for the tabs
         backLayer = FrameLayout(this).apply { alpha = 0f }
+        // The two pictures live in their own holder: the crossfade brings one to the front of
+        // the holder only, never above the shading layers on top of it
+        val backImages = FrameLayout(this)
         backBack = backdropView()
         backFront = backdropView()
-        backLayer.addView(backBack, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
-        backLayer.addView(backFront, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
-        backLayer.addView(View(this).apply { setBackgroundColor(0x4D07070C) }, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+        backImages.addView(backBack, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+        backImages.addView(backFront, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+        backLayer.addView(backImages, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+        backLayer.addView(View(this).apply { setBackgroundColor(0x5907070C) }, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
         backLayer.addView(View(this).apply {
             // Stays dark across the whole text column, so light pictures never wash out the details
             background = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT,
-                intArrayOf(0xF507070C.toInt(), 0xEB07070C.toInt(), 0xCC07070C.toInt(), 0x8007070C.toInt(), 0x0007070C))
+                intArrayOf(0xF707070C.toInt(), 0xF007070C.toInt(), 0xD907070C.toInt(), 0x8C07070C.toInt(), 0x0007070C))
         }, FrameLayout.LayoutParams((screenW * 0.8f).toInt(), MATCH_PARENT, Gravity.START))
         backLayer.addView(View(this).apply {
-            background = GradientDrawable(GradientDrawable.Orientation.BOTTOM_TOP, intArrayOf(0xF207070C.toInt(), 0xB307070C.toInt(), 0x0007070C))
-        }, FrameLayout.LayoutParams(MATCH_PARENT, (screenH * 0.5f).toInt(), Gravity.BOTTOM))
+            background = GradientDrawable(GradientDrawable.Orientation.BOTTOM_TOP, intArrayOf(0xFA07070C.toInt(), 0xE607070C.toInt(), 0x9907070C.toInt(), 0x0007070C))
+        }, FrameLayout.LayoutParams(MATCH_PARENT, (screenH * 0.58f).toInt(), Gravity.BOTTOM))
         backLayer.addView(View(this).apply {
-            background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(0xCC07070C.toInt(), 0x0007070C))
-        }, FrameLayout.LayoutParams(MATCH_PARENT, (screenH * 0.14f).toInt(), Gravity.TOP))
+            background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(0xE607070C.toInt(), 0x8007070C.toInt(), 0x0007070C))
+        }, FrameLayout.LayoutParams(MATCH_PARENT, (screenH * 0.2f).toInt(), Gravity.TOP))
         root.addView(backLayer, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
 
         // ---- Welcome: a dim picture of something to watch behind the search bar, status and
@@ -401,7 +405,7 @@ class MainActivity : Activity() {
             letterSpacing = -0.02f
             maxLines = 1
             ellipsize = TextUtils.TruncateAt.END
-            setShadowLayer(u(1.2f).toFloat(), 0f, 0f, 0x6622D3EE)
+            setShadowLayer(u(1f).toFloat(), 0f, u(0.15f).toFloat(), 0x99000000.toInt())
         }
         date = text(1.8f, 0xCCF2F2F7.toInt())
         welcome.addView(greeting)
@@ -416,14 +420,22 @@ class MainActivity : Activity() {
         // ---- Tabs: always visible; moving onto one swaps the rows
         tabRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            setPadding(0, u(1.0f), 0, u(0.6f))
+        }
+        // Centered in a frosted pill, Apple TV style
+        val tabGlass = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(u(2.3f), u(1.2f), u(3.5f), u(0.6f))
+            setPadding(u(0.4f), u(0.4f), u(0.4f), u(0.4f))
+            background = rounded(0xB3141420.toInt(), u(4f).toFloat(), 0x1FFFFFFF)
         }
         tabs.forEach { (id, label, icon) ->
             val view = tabView(id, label, icon)
             tabViews[id] = view
-            tabRow.addView(view, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { rightMargin = u(0.8f) })
+            tabGlass.addView(view, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { leftMargin = u(0.15f); rightMargin = u(0.15f) })
         }
+        tabRow.addView(tabGlass, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT))
         styleTabs()
         column.addView(tabRow, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
 
@@ -454,12 +466,13 @@ class MainActivity : Activity() {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        heroImdb = text(1.35f, TEXT, bold = true).apply { visibility = View.GONE }
+        heroImdb = text(1.45f, TEXT, bold = true).apply { visibility = View.GONE }
         metaRow.addView(heroImdb, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { rightMargin = u(1.2f) })
-        heroMeta = text(1.25f, 0xE6F2F2F7.toInt(), bold = true).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
+        heroMeta = text(1.35f, 0xF2F4F4F8.toInt()).apply { typeface = interSemibold; maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
         metaRow.addView(heroMeta, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT))
         hero.addView(metaRow, LinearLayout.LayoutParams(u(52f), WRAP_CONTENT).apply { topMargin = u(0.9f) })
-        heroAwards = text(1.1f, 0xFFFBBF24.toInt(), bold = true).apply {
+        heroAwards = text(1.2f, 0xFFFBBF24.toInt()).apply {
+            typeface = interSemibold
             maxLines = 1
             ellipsize = TextUtils.TruncateAt.END
             compoundDrawablePadding = u(0.5f)
@@ -471,9 +484,9 @@ class MainActivity : Activity() {
         // The synopsis is always shown whole (long ones get a slightly smaller font, see applyHero)
         heroDesc = text(1.3f, 0xF2F2F2F7.toInt()).apply { setLineSpacing(0f, 1.12f) }
         hero.addView(heroDesc, LinearLayout.LayoutParams(u(54f), WRAP_CONTENT).apply { topMargin = u(0.8f) })
-        heroCredits = text(1.0f, 0xCCF2F2F7.toInt()).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
+        heroCredits = text(1.15f, 0xB3F4F4F8.toInt()).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
         hero.addView(heroCredits, LinearLayout.LayoutParams(u(44f), WRAP_CONTENT).apply { topMargin = u(0.7f) })
-        heroHint = text(1.05f, CYAN).apply { visibility = View.GONE }
+        heroHint = text(1.1f, 0x99F4F4F8.toInt()).apply { typeface = interMedium; visibility = View.GONE }
         hero.addView(heroHint, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { topMargin = u(0.9f) })
         // A dark shadow under every line of the details, readable even over white
         listOf(heroTitle, heroImdb, heroMeta, heroAwards, heroDesc, heroCredits, heroHint).forEach {
@@ -608,12 +621,12 @@ class MainActivity : Activity() {
     private fun stylePill(view: TextView, open: Boolean) {
         val radius = u(3f).toFloat()
         view.background = StateListDrawable().apply {
-            addState(intArrayOf(android.R.attr.state_focused), rounded(CYAN, radius, CYAN))
-            addState(intArrayOf(), if (open) rounded(0x26FFFFFF, radius, 0x33FFFFFF) else rounded(Color.TRANSPARENT, radius, Color.TRANSPARENT))
+            addState(intArrayOf(android.R.attr.state_focused), rounded(Color.WHITE, radius, Color.WHITE))
+            addState(intArrayOf(), if (open) rounded(0x2EFFFFFF, radius, Color.TRANSPARENT) else rounded(Color.TRANSPARENT, radius, Color.TRANSPARENT))
         }
         val colors = android.content.res.ColorStateList(
             arrayOf(intArrayOf(android.R.attr.state_focused), intArrayOf()),
-            intArrayOf(BG, if (open) TEXT else MUTED),
+            intArrayOf(BG, if (open) TEXT else 0xB3F4F4F8.toInt()),
         )
         view.setTextColor(colors)
         view.compoundDrawableTintList = colors
@@ -757,7 +770,7 @@ class MainActivity : Activity() {
         heroAwards.visibility = View.GONE
         // The first paragraph is what the video is about; the rest is usually links
         val about = video.optString("description").split(Regex("\\n\\s*\\n")).firstOrNull().orEmpty().take(420)
-        heroDesc.textSize = px(1.2f)
+        heroDesc.textSize = px(1.4f)
         heroDesc.text = about
         heroCredits.text = ""
         heroHint.text = if (YouTube.smartTube(this) != null) "OK abre no SmartTube, sem anúncios" else "Instale o SmartTube na TV para ver sem anúncios"
@@ -778,8 +791,10 @@ class MainActivity : Activity() {
         heroAwards.visibility = View.GONE
         heroDesc.text = ""
         heroCredits.text = ""
-        heroHint.text = hint
-        heroHint.visibility = if (hint.isEmpty()) View.GONE else View.VISIBLE
+        // "OK abre" alone says nothing new: only hints that add something are shown
+        val useful = hint.takeUnless { it == "OK abre" }.orEmpty()
+        heroHint.text = useful
+        heroHint.visibility = if (useful.isEmpty()) View.GONE else View.VISIBLE
         setBackdrop(null)
     }
 
@@ -813,9 +828,9 @@ class MainActivity : Activity() {
         heroAwards.visibility = if (awards != null) View.VISIBLE else View.GONE
         val synopsis = item.optString("description")
         heroDesc.textSize = px(when {
-            synopsis.length <= 320 -> 1.3f
-            synopsis.length <= 480 -> 1.15f
-            else -> 1.0f
+            synopsis.length <= 320 -> 1.5f
+            synopsis.length <= 480 -> 1.3f
+            else -> 1.15f
         })
         heroDesc.text = synopsis
         fun names(key: String, max: Int) = item.optJSONArray(key)?.let { a -> List(minOf(max, a.length())) { a.optString(it) } }?.filter { it.isNotBlank() }.orEmpty()
@@ -1127,7 +1142,8 @@ class MainActivity : Activity() {
             clipChildren = false
             clipToPadding = false
         }
-        row.addView(text(1.35f, 0xE6F2F2F7.toInt(), bold = true).apply {
+        row.addView(text(1.5f, 0xF2F4F4F8.toInt()).apply {
+            typeface = interSemibold
             text = title
             icon?.let { res ->
                 val d = getDrawable(res)!!.apply { setBounds(0, 0, u(1.5f), u(1.5f)) }
@@ -1242,7 +1258,7 @@ class MainActivity : Activity() {
         return mediaTile(
             key = "sw:hint", item = null, extra = null, imageUrl = null, fallbackUrl = null,
             width = w, height = w * 9 / 16, overlay = message, progress = null,
-            textTitle = "Continuar assistindo", textInfo = message.replace("\n", " "),
+            textTitle = if (stremioLoggedIn) "Nada em andamento" else "Conecte seu Stremio", textInfo = message.replace("\n", " "),
         ) { packageManager.getLaunchIntentForPackage("com.stremio.one")?.let { startActivity(it) } ?: toast("Instale o Stremio na TV") }
     }
 
@@ -1255,6 +1271,26 @@ class MainActivity : Activity() {
             imageUrl = item.optString("poster").ifEmpty { "https://images.metahub.space/poster/medium/$id/img" }, fallbackUrl = null,
             width = w, height = w * 3 / 2, overlay = null, progress = null,
         ) { openInStremio(item, null) }
+    }
+
+    /**
+     * Apple TV-like focus: a soft light across the top of the picture and a faint edge, in place
+     * of a hard white frame (see [liftOnFocus]).
+     */
+    private fun focusSheen() = View(this).apply {
+        background = android.graphics.drawable.LayerDrawable(arrayOf(
+            GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(0x38FFFFFF, 0x0AFFFFFF, 0x00FFFFFF)).apply { cornerRadius = u(0.9f).toFloat() },
+            GradientDrawable().apply { cornerRadius = u(0.9f).toFloat(); setStroke(maxOf(2, u(0.1f)), 0x59FFFFFF) },
+        ))
+        alpha = 0f
+    }
+
+    /** The focused picture lifts: grows, casts a shadow and catches the light. */
+    private fun liftOnFocus(art: View, sheen: View, focused: Boolean) {
+        val scale = if (focused) 1.12f else 1f
+        art.animate().scaleX(scale).scaleY(scale).translationZ(if (focused) u(1.4f).toFloat() else 0f)
+            .setDuration(180).setInterpolator(DecelerateInterpolator()).start()
+        sheen.animate().alpha(if (focused) 1f else 0f).setDuration(180).start()
     }
 
     /** A focusable picture card; focusing it fills the hero with the title's details. */
@@ -1296,17 +1332,11 @@ class MainActivity : Activity() {
             track.addView(View(this).apply { setBackgroundColor(CYAN) }, FrameLayout.LayoutParams((width * progress.coerceIn(0f, 1f)).toInt(), MATCH_PARENT))
             art.addView(track, FrameLayout.LayoutParams(MATCH_PARENT, maxOf(3, u(0.35f)), Gravity.BOTTOM))
         }
-        val ring = View(this).apply {
-            background = GradientDrawable().apply { cornerRadius = u(0.8f).toFloat(); setStroke(u(0.22f), Color.WHITE) }
-            visibility = View.INVISIBLE
-        }
+        val ring = focusSheen()
         art.addView(ring, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
         box.addView(art, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
         box.setOnFocusChangeListener { _, focused ->
-            ring.visibility = if (focused) View.VISIBLE else View.INVISIBLE
-            val scale = if (focused) 1.08f else 1f
-            art.animate().scaleX(scale).scaleY(scale).setDuration(140).setInterpolator(DecelerateInterpolator()).start()
-            art.elevation = if (focused) u(1f).toFloat() else 0f
+            liftOnFocus(art, ring, focused)
             if (focused) {
                 bringRowToTop(box)
                 if (item != null) heroFor(item, extra) else heroText(textTitle, textInfo, "OK abre o Stremio")
@@ -1492,20 +1522,25 @@ class MainActivity : Activity() {
             clipChildren = false
         }
         val art = FrameLayout(this).apply {
-            background = rounded(SURFACE, u(0.8f).toFloat(), if (favorite) VIOLET_DIM else LINE)
+            // Shortcut tiles are frosted glass with white icons; app banners sit on a dark tile
+            background = if (iconTile) rounded(0x1CFFFFFF, u(0.9f).toFloat(), 0x14FFFFFF) else rounded(SURFACE, u(0.9f).toFloat(), LINE)
             outlineProvider = object : ViewOutlineProvider() {
                 override fun getOutline(view: View, outline: Outline) =
-                    outline.setRoundRect(0, 0, view.width, view.height, u(0.8f).toFloat())
+                    outline.setRoundRect(0, 0, view.width, view.height, u(0.9f).toFloat())
             }
             clipToOutline = true
         }
         val image = ImageView(this).apply {
             scaleType = if (iconTile) ImageView.ScaleType.FIT_CENTER else ImageView.ScaleType.CENTER_CROP
-            if (iconTile) setPadding(w / 3, h / 5, w / 3, h * 2 / 5)
+            if (iconTile) {
+                setPadding(w * 2 / 5, h / 5, w * 2 / 5, h * 2 / 5)
+                imageTintList = android.content.res.ColorStateList.valueOf(0xF2FFFFFF.toInt())
+            }
         }
         art.addView(image, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
         if (iconTile) {
-            art.addView(text(1.05f, TEXT, bold = true).apply {
+            art.addView(text(1.1f, TEXT).apply {
+                typeface = interMedium
                 text = title
                 gravity = Gravity.CENTER
                 maxLines = 1
@@ -1518,13 +1553,7 @@ class MainActivity : Activity() {
             track.addView(View(this).apply { setBackgroundColor(CYAN) }, FrameLayout.LayoutParams((w * progress.coerceIn(0f, 1f)).toInt(), MATCH_PARENT))
             art.addView(track, FrameLayout.LayoutParams(MATCH_PARENT, maxOf(3, u(0.35f)), Gravity.BOTTOM))
         }
-        val ring = View(this).apply {
-            background = GradientDrawable().apply {
-                cornerRadius = u(0.8f).toFloat()
-                setStroke(u(0.22f), Color.WHITE)
-            }
-            visibility = View.INVISIBLE
-        }
+        val ring = focusSheen()
         art.addView(ring, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
         box.addView(art, LinearLayout.LayoutParams(w, h))
         box.layoutParams = LinearLayout.LayoutParams(w, WRAP_CONTENT).apply { rightMargin = u(1.2f) }
@@ -1532,15 +1561,7 @@ class MainActivity : Activity() {
         bindImage(image)
 
         box.setOnFocusChangeListener { _, focused ->
-            ring.visibility = if (focused) View.VISIBLE else View.INVISIBLE
-            val scale = if (focused) 1.1f else 1f
-            AnimatorSet().apply {
-                playTogether(ObjectAnimator.ofFloat(art, View.SCALE_X, scale), ObjectAnimator.ofFloat(art, View.SCALE_Y, scale))
-                duration = 130
-                interpolator = DecelerateInterpolator()
-                start()
-            }
-            art.elevation = if (focused) u(1f).toFloat() else 0f
+            liftOnFocus(art, ring, focused)
             if (focused) {
                 bringRowToTop(box)
                 heroText(title, subtitle, if (onOptions != null) "OK abre   ·   segure OK para opções" else "OK abre")
@@ -2019,9 +2040,17 @@ class MainActivity : Activity() {
     private fun text(sizePercent: Float, color: Int, bold: Boolean = false) = TextView(this).apply {
         textSize = px(sizePercent)
         setTextColor(color)
-        if (bold) typeface = Typeface.DEFAULT_BOLD
+        typeface = if (bold) interBold else interRegular
         includeFontPadding = false
     }
+
+    // Inter (SIL Open Font License, see assets/fonts), close to Apple's own type
+    private fun font(name: String) = runCatching { Typeface.createFromAsset(assets, "fonts/inter_$name.ttf") }.getOrNull()
+    private val interRegular by lazy { font("regular") ?: Typeface.DEFAULT }
+    private val interMedium by lazy { font("medium") ?: Typeface.DEFAULT }
+    private val interSemibold by lazy { font("semibold") ?: Typeface.DEFAULT_BOLD }
+    private val interBold by lazy { font("bold") ?: Typeface.DEFAULT_BOLD }
+    private val interHeavy by lazy { font("extrabold") ?: Typeface.DEFAULT_BOLD }
 
     private fun rounded(fill: Int, radius: Float, stroke: Int) = GradientDrawable().apply {
         setColor(fill)

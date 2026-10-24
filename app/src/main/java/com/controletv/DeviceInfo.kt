@@ -15,4 +15,9 @@ fun deviceName(context: Context): String {
 }
 
 /** What the phone's start screen calls this device: the Fire TV is "tv", anything else "projetor". */
-fun deviceKind(context: Context): String = if (HomeWatcher.isFireTv(context)) "tv" else "projetor"
+fun deviceKind(context: Context): String {
+    // For testing on an emulator: "adb shell settings put global controletv_kind tv" (or projetor)
+    runCatching { Settings.Global.getString(context.contentResolver, "controletv_kind") }.getOrNull()
+        ?.takeIf { it == "tv" || it == "projetor" }?.let { return it }
+    return if (HomeWatcher.isFireTv(context)) "tv" else "projetor"
+}
