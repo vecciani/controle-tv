@@ -876,12 +876,12 @@ function settingsSheet() {
 
     <h4>Tela ${projector ? 'do projetor' : 'da TV'}</h4>
     <div class="sheet-actions">
-      <button class="sheet-btn${s.homeLauncher ? ' primary' : ''}" id="s-home">${icon('house')}${s.homeLauncher ? 'Controle TV é a tela inicial (desligar)' : 'Usar o Controle TV como tela inicial'}</button>
+      <button class="sheet-btn${s.homeLauncher ? ' on' : ''}" id="s-home">${icon('house')}${s.homeLauncher ? 'Controle TV é a tela inicial (desligar)' : 'Usar o Controle TV como tela inicial'}</button>
       <button class="sheet-btn" id="s-name">${icon('pencil')}Nome na saudação: <span id="s-name-value"></span></button>
       <button class="sheet-btn" id="s-saver">${icon('image')}Tela de descanso</button>
       <button class="sheet-btn" id="s-player">${icon('play')}Player de vídeo</button>
       ${projector ? '' : `<button class="sheet-btn" id="s-musicapp">${icon('music')}Música toca no: ${s.musicApp === 'smarttube' ? 'SmartTube' : 'AuraMusic'}</button>`}
-      ${projector ? '' : `<button class="sheet-btn${s.musicClip !== false ? ' primary' : ''}" id="s-clip">${icon('music')}Clipe da música no fundo: ${s.musicClip !== false ? 'ligado' : 'desligado'}</button>`}
+      ${projector ? '' : `<button class="sheet-btn${s.musicClip !== false ? ' on' : ''}" id="s-clip">${icon('music')}Clipe da música no fundo: ${s.musicClip !== false ? 'ligado' : 'desligado'}</button>`}
     </div>
 
     <h4>Atualização</h4>
@@ -1051,7 +1051,7 @@ async function screensaverSheet() {
   const saver = state.status?.screensaver || { enabled: true, minutes: 2, dim: 0.35, photos: 0 };
   const sheet = openSheet(`
     <div class="sheet-head"><div><h3>Tela de descanso</h3><p>Fotos, relógio e música quando a TV fica parada</p></div></div>
-    <button class="sheet-btn${saver.enabled ? ' primary' : ''}" id="v-toggle">${icon(saver.enabled ? 'check' : 'x')}${saver.enabled ? 'Ligada' : 'Desligada'}</button>
+    <button class="sheet-btn${saver.enabled ? ' on' : ''}" id="v-toggle">${icon(saver.enabled ? 'check' : 'x')}${saver.enabled ? 'Ligada' : 'Desligada'}</button>
     <h4>Entrar depois de</h4>
     <div class="lang-row" id="v-minutes"></div>
     <h4>Escurecer as fotos</h4>
@@ -1136,7 +1136,7 @@ async function playerSheet() {
     const options = [{ pkg: '', label: 'Controle TV (com VLC de reserva)' }, ...players];
     sheet.querySelector('#s-players').replaceChildren(...options.map((p) => {
       const btn = document.createElement('button');
-      btn.className = 'sheet-btn' + (p.pkg === preferred ? ' primary' : '');
+      btn.className = 'sheet-btn' + (p.pkg === preferred ? ' on' : '');
       btn.innerHTML = p.pkg === preferred ? icon('check') : icon('play');
       btn.append(p.label);
       btn.onclick = async () => {
@@ -1588,7 +1588,7 @@ async function subtitlesSheet() {
     const auto = player.autoCc || {};
     tracksBox.replaceChildren(...options.map((t) => {
       const btn = document.createElement('button');
-      btn.className = 'sheet-btn' + (t.selected ? ' primary' : '');
+      btn.className = 'sheet-btn' + (t.selected ? ' on' : '');
       btn.innerHTML = t.selected ? icon('check') : icon(t.id === 'off' ? 'x' : t.id === 'auto' ? 'zap' : 'captions');
       const status = t.id === 'auto' && AUTO_STATUS[auto.status] ? ` · ${AUTO_STATUS[auto.status](auto.progress)}` : '';
       btn.append(t.label + status);

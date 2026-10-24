@@ -8,6 +8,9 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <title>Controle TV</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
 <link rel="stylesheet" href="base.css">
 <link rel="stylesheet" href="phone.css">
 </head>
@@ -29,9 +32,8 @@
 <div id="app" hidden>
   <header class="topbar">
     <button class="brand" id="device-switch" aria-label="Trocar de aparelho">
-      <i data-icon="tv"></i>
-      <span class="brand-text"><span class="brand-label">CONTROLE<b>TV</b></span><small id="device-name"></small></span>
-      <i data-icon="down" class="brand-chevron"></i>
+      <span class="brand-mark"><i data-icon="tv"></i></span>
+      <span class="brand-text"><span class="brand-label">Controle TV</span><span class="brand-device"><small id="device-name"></small><i data-icon="down" class="brand-chevron"></i></span></span>
     </button>
     <button class="status" id="status-pill"><span class="dot" id="status-dot"></span><span id="status-text">Conectando</span></button>
     <button class="icon-btn" id="open-settings" aria-label="Ajustes"><i data-icon="settings"></i></button>
@@ -192,8 +194,10 @@
         <button data-mode="all" class="on">Todos</button>
         <button data-mode="running">Abertos <span class="count" id="running-count">0</span></button>
       </div>
-      <button class="install-btn" id="organize-tv"><i data-icon="grid"></i><span>Organizar a tela da TV</span></button>
-      <button class="install-btn" id="install-tv" hidden><i data-icon="download"></i><span>Instalar app na TV</span></button>
+      <div class="action-row">
+        <button class="install-btn" id="organize-tv"><i data-icon="grid"></i><span>Organizar a TV</span></button>
+        <button class="install-btn" id="install-tv" hidden><i data-icon="download"></i><span>Instalar app</span></button>
+      </div>
       <label class="search">
         <i data-icon="search"></i>
         <input id="apps-search" type="search" placeholder="Buscar app" autocomplete="off">
