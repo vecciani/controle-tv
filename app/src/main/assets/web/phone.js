@@ -961,6 +961,7 @@ function settingsSheet() {
     <h4>Tela ${projector ? 'do projetor' : 'da TV'}</h4>
     <div class="sheet-actions">
       <button class="sheet-btn${s.homeLauncher ? ' on' : ''}" id="s-home">${icon('house')}${s.homeLauncher ? 'Controle TV é a tela inicial (desligar)' : 'Usar o Controle TV como tela inicial'}</button>
+      ${projector ? '' : `<button class="sheet-btn${s.fullLock ? ' on' : ''}" id="s-lock">${icon('lock')}${s.fullLock ? 'Bloqueio total ligado (desfazer)' : 'Bloqueio total da tela da Amazon (experimental)'}</button>`}
       <button class="sheet-btn" id="s-name">${icon('pencil')}Nome na saudação: <span id="s-name-value"></span></button>
       <button class="sheet-btn" id="s-saver">${icon('image')}Tela de descanso</button>
       <button class="sheet-btn" id="s-player">${icon('play')}Player de vídeo</button>
@@ -1059,6 +1060,23 @@ function settingsSheet() {
           : 'Desligado: o Home volta a abrir a tela da Amazon');
         settingsSheet();
       }, 1500);
+    } catch (e) { toast(e.message, true); }
+  });
+  sheetButton(sheet, 's-lock', async () => {
+    const on = !s.fullLock;
+    // Two taps to switch on: the first one explains what happens
+    const btn = sheet.querySelector('#s-lock');
+    if (on && !btn.dataset.armed) {
+      btn.dataset.armed = '1';
+      btn.innerHTML = `${icon('lock')}Toque de novo: desliga a tela da Amazon (dá para desfazer aqui; desligue antes de desinstalar o app)`;
+      return;
+    }
+    toast(on ? 'Ligando o bloqueio…' : 'Desfazendo…');
+    try {
+      const r = await api('/api/home/lock', { on });
+      toast(r.message, on && !r.locked);
+      await refreshStatus();
+      settingsSheet();
     } catch (e) { toast(e.message, true); }
   });
   sheetButton(sheet, 's-pin', async () => {

@@ -29,25 +29,45 @@ class HomeWatcher : AccessibilityService() {
         super.onDestroy()
     }
 
-    // Every remote key counts as activity for the screensaver (and is passed on untouched)
+    // Every remote key counts as activity for the screensaver. The Home button is taken over
+    // before the system sees it (when ours is the home screen): a press opens ours straight away,
+    // so the Amazon home never flashes; holding it opens the original home (a way out).
     override fun onKeyEvent(event: KeyEvent): Boolean {
         ScreenSaver.touch()
-        if (event.keyCode == KeyEvent.KEYCODE_HOME && event.action == KeyEvent.ACTION_UP) homePressedAt = System.currentTimeMillis()
-        return false
+        if (event.keyCode != KeyEvent.KEYCODE_HOME) return false
+        if (!redirectHome(this)) {
+            if (event.action == KeyEvent.ACTION_UP) homePressedAt = System.currentTimeMillis()
+            return false
+        }
+        when (event.action) {
+            KeyEvent.ACTION_DOWN -> if (event.repeatCount == 0) homeDownAt = event.eventTime
+            KeyEvent.ACTION_UP -> {
+                val held = event.eventTime - homeDownAt
+                homePressedAt = System.currentTimeMillis()
+                if (held >= LONG_PRESS_MS) openOriginalHome(this) else {
+                    amazonAllowed = false
+                    MainActivity.open(this)
+                }
+            }
+        }
+        return true
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent) {
         if (event.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
         val pkg = event.packageName?.toString() ?: return
         if (!pkg.startsWith("com.android.systemui")) ScreenSaver.foreground = pkg
+        lastWindow = pkg + "/" + (event.className ?: "")
+        lastWindowAt = System.currentTimeMillis()
         when {
             pkg == packageName -> return
             isOriginalHome(this, pkg) -> {
                 if (amazonAllowed || !redirectHome(this)) return
-                // The Amazon app is also the store and the search: only take over right after Home
+                // The Amazon app is also the store and the search: take over right after Home, and
+                // whenever its home screen itself comes up (back out of an app, after booting…)
                 val afterHome = System.currentTimeMillis() - homePressedAt < 2_500
                 val homeScreen = event.className?.toString()?.let { HOME_ACTIVITY.containsMatchIn(it) } == true
-                if (afterHome || (homeScreen && homeKeySeen.not())) MainActivity.open(this)
+                if (afterHome || homeScreen) MainActivity.open(this)
             }
             // Some other app is on screen: the user left the original home
             !pkg.startsWith("com.android.systemui") -> amazonAllowed = false
@@ -83,8 +103,14 @@ class HomeWatcher : AccessibilityService() {
             private set
 
         @Volatile private var homePressedAt = 0L
-        // Once a Home press has been seen, rely on it alone (no guessing from screen names)
-        private val homeKeySeen get() = homePressedAt != 0L
+        @Volatile private var homeDownAt = 0L
+        private const val LONG_PRESS_MS = 700L
+
+        /** The window on screen ("package/Class") and when it came up, to check what a shortcut opened. */
+        @Volatile var lastWindow = ""
+            private set
+        @Volatile var lastWindowAt = 0L
+            private set
         private val HOME_ACTIVITY = Regex("(?i)home(?!.*(search|store|appstore|settings))")
 
         /** True after the user chose to open the original home from our screen. */
@@ -157,6 +183,46 @@ class HomeWatcher : AccessibilityService() {
                         ?.let { Adb.shell("cmd package set-home-activity ${it.activityInfo.packageName}/${it.activityInfo.name}") }
                 }
             }
+        }
+
+        /** "Bloqueio total" (Fire TV): Amazon's home is switched off and ours is the only one. */
+        fun fullLock(context: Context) = context.getSharedPreferences("home", Context.MODE_PRIVATE).getString("lockedPkg", null) != null
+
+        /**
+         * Switches Amazon's home app off (pm disable-user, undone with pm enable) so the TV has no
+         * home but ours: Home, boot and every app's exit land here, with nothing to redirect. Ours
+         * is made the home entry first, so the TV is never left without one. Needs ADB; newer
+         * Fire OS may refuse to switch its launcher off, which is reported. Returns a message.
+         */
+        fun setFullLock(context: Context, on: Boolean): String {
+            val prefs = context.getSharedPreferences("home", Context.MODE_PRIVATE)
+            val alias = ComponentName(context, HOME_ALIAS)
+            if (!on) {
+                val pkg = prefs.getString("lockedPkg", null) ?: return "O bloqueio total já está desligado"
+                val out = Adb.shell("pm enable $pkg")
+                if (!out.contains("enabled", ignoreCase = true)) return "A TV não religou a tela da Amazon: $out"
+                prefs.edit().remove("lockedPkg").apply()
+                homePackages = null
+                if (isFireTv(context)) {
+                    context.packageManager.setComponentEnabledSetting(alias, PackageManager.COMPONENT_ENABLED_STATE_DISABLED, PackageManager.DONT_KILL_APP)
+                }
+                return "Bloqueio desligado: a tela da Amazon voltou (o Home segue abrindo o Controle TV se a tela inicial estiver ligada)"
+            }
+            val homeIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
+            val original = context.packageManager.queryIntentActivities(homeIntent, 0)
+                .map { it.activityInfo.packageName }.firstOrNull { isOriginalHome(context, it) }
+                ?: return "Não achei a tela inicial da Amazon nesta TV"
+            // Ours becomes a home first: the TV must never be without one
+            context.packageManager.setComponentEnabledSetting(alias, PackageManager.COMPONENT_ENABLED_STATE_ENABLED, PackageManager.DONT_KILL_APP)
+            runCatching { Adb.shell("cmd package set-home-activity ${context.packageName}/$HOME_ALIAS") }
+            val out = Adb.shell("pm disable-user --user 0 $original")
+            if (!out.contains("disabled", ignoreCase = true)) {
+                return "A Fire TV não deixou desligar a tela da Amazon (${out.trim().take(120)}). O Home continua abrindo o Controle TV pelo modo normal."
+            }
+            prefs.edit().putString("lockedPkg", original).putBoolean("redirect", true).apply()
+            homePackages = null
+            if (!running) setEnabled(true)
+            return "Bloqueio total ligado: a tela da Amazon foi desligada. Para desfazer, use o mesmo botão."
         }
 
         /** Turns the service on or off through ADB (accessibility settings are "secure" settings). */

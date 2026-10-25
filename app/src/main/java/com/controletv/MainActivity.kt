@@ -306,7 +306,7 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER_VERTICAL
         }
         val searchBar = Button(this).apply {
-            text = if (isProjector) "Pesquisar filmes e séries no Stremio…" else "Pesquisar no Stremio, SmartTube e AuraMusic…"
+            text = if (isProjector) "Pesquisar filmes e séries no Stremio…" else "Pesquisar no Stremio, YouTube e ${MusicBridge.appName(this@MainActivity)}…"
             isAllCaps = false
             textSize = px(1.2f)
             setTextColor(MUTED)
@@ -339,7 +339,7 @@ class MainActivity : Activity() {
                 addState(intArrayOf(), rounded(Color.TRANSPARENT, u(2f).toFloat(), Color.TRANSPARENT))
             }
             setOnClickListener {
-                if (!SystemShortcuts.open(this@MainActivity, SystemShortcuts.SETTINGS.first { it.key == "set:net" })) toast("Esta TV não abriu a tela de rede")
+                SystemShortcuts.openAsync(this@MainActivity, SystemShortcuts.SETTINGS.first { it.key == "set:net" }) { toast("Esta TV não abriu a tela de rede") }
             }
         }
         topRow.addView(wifiButton, LinearLayout.LayoutParams(u(2.5f), u(2.5f)).apply { rightMargin = u(1.4f) })
@@ -363,7 +363,8 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER_VERTICAL
         }
         // The weather card (taller, with the next days) sets the row's height; the other matches it
-        widgets.addView(if (isProjector) buildProjectorWidget() else buildMusicWidget(), LinearLayout.LayoutParams(u(42f), MATCH_PARENT))
+        // (The projector's card sizes itself: the weather may not be there to set the height)
+        widgets.addView(if (isProjector) buildProjectorWidget() else buildMusicWidget(), LinearLayout.LayoutParams(u(42f), if (isProjector) WRAP_CONTENT else MATCH_PARENT))
         widgets.addView(buildWeatherWidget(), LinearLayout.LayoutParams(u(26f), WRAP_CONTENT).apply { leftMargin = u(1.4f) })
         welcome.addView(widgets, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { topMargin = u(2.4f) })
         if (!isProjector) welcome.addView(buildPlaylists(), LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = u(2f) })
@@ -721,7 +722,7 @@ class MainActivity : Activity() {
             "week" -> if (data?.aiItems.isNullOrEmpty()) "Conte seu gosto pelo celular, na aba Semana" else "Sugestões da IA para o seu gosto, renovadas toda segunda"
             "youtube" -> if (ytRows.isEmpty()) "Escolha seus canais pelo celular, na aba YouTube" else "${ytRows.size} canais   ·   abre no SmartTube, sem anúncios"
             "apps" -> "${data?.apps?.size ?: 0} apps na TV"
-            "settings" -> "Telas da Fire TV, entradas e tela inicial"
+            "settings" -> if (isProjector) "Telas do projetor, entradas e tela inicial" else "Telas da Fire TV, entradas e tela inicial"
             else -> restSummary()
         }
         heroText(tabs.first { it.first == tab }.second, about, "Desça para escolher")
@@ -1062,9 +1063,9 @@ class MainActivity : Activity() {
     }
 
     private fun settingsRows() {
-        rows.addView(row("Telas da Fire TV", SystemShortcuts.SETTINGS.map { shortcut ->
-            card(shortcut.key, shortcut.title, "Configurações da TV", false, { it.setImageResource(shortcut.icon) }, iconTile = true) {
-                if (!SystemShortcuts.open(this, shortcut)) toast("Esta TV não abriu essa tela. Veja o diagnóstico nos Ajustes do celular.")
+        rows.addView(row(if (isProjector) "Telas do projetor" else "Telas da Fire TV", SystemShortcuts.SETTINGS.map { shortcut ->
+            card(shortcut.key, if (isProjector && shortcut.key == "set:about") "Sobre o aparelho" else shortcut.title, "Configurações da TV", false, { it.setImageResource(shortcut.icon) }, iconTile = true) {
+                SystemShortcuts.openAsync(this, shortcut) { toast("Esta TV não abriu essa tela. Veja o diagnóstico nos Ajustes do celular.") }
             }
         }))
         val inputs = SystemShortcuts.inputs(this)
@@ -1859,7 +1860,7 @@ class MainActivity : Activity() {
         val box = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(u(1.4f), u(1.2f), u(1.4f), u(1.2f))
-            background = rounded(0xCC12121D.toInt(), u(1.2f).toFloat(), VIOLET_DIM)
+            background = rounded(0x1CFFFFFF, u(1.2f).toFloat(), 0x14FFFFFF)
         }
         // Brightness
         val bright = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
@@ -1867,7 +1868,7 @@ class MainActivity : Activity() {
         bright.addView(brightnessLabel, LinearLayout.LayoutParams(u(11f), WRAP_CONTENT))
         bright.addView(mediaButton(R.drawable.ic_t_minus, false) { changeBrightness(-10) })
         val track = FrameLayout(this).apply { background = rounded(0x33FFFFFF, u(0.4f).toFloat(), 0x00000000) }
-        brightnessBar = View(this).apply { background = rounded(CYAN, u(0.4f).toFloat(), CYAN) }
+        brightnessBar = View(this).apply { background = rounded(Color.WHITE, u(0.4f).toFloat(), Color.WHITE) }
         track.addView(brightnessBar, FrameLayout.LayoutParams(0, MATCH_PARENT))
         bright.addView(track, LinearLayout.LayoutParams(0, u(0.8f), 1f).apply { leftMargin = u(0.8f); rightMargin = u(0.2f) })
         bright.addView(mediaButton(R.drawable.ic_t_plus, false) { changeBrightness(10) })
@@ -1879,12 +1880,12 @@ class MainActivity : Activity() {
             isFocusable = true
             setPadding(u(0.6f), u(0.6f), u(0.6f), u(0.6f))
             background = StateListDrawable().apply {
-                addState(intArrayOf(android.R.attr.state_focused), rounded(0x3322D3EE, u(1f).toFloat(), CYAN))
+                addState(intArrayOf(android.R.attr.state_focused), rounded(0x33FFFFFF, u(1f).toFloat(), Color.WHITE))
                 addState(intArrayOf(), rounded(Color.TRANSPARENT, u(1f).toFloat(), Color.TRANSPARENT))
             }
             setOnClickListener { runCatching { Projector.openBluetoothSettings(this@MainActivity) }.onFailure { toast("Não abriu o Bluetooth") } }
         }
-        bt.addView(ImageView(this).apply { setImageResource(R.drawable.ic_t_bluetooth) }, LinearLayout.LayoutParams(u(2.6f), u(2.6f)))
+        bt.addView(ImageView(this).apply { setImageResource(R.drawable.ic_t_bluetooth); setColorFilter(Color.WHITE) }, LinearLayout.LayoutParams(u(2.6f), u(2.6f)))
         bluetoothLabel = text(1.25f, TEXT).apply { maxLines = 2; ellipsize = TextUtils.TruncateAt.END }
         bt.addView(bluetoothLabel, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f).apply { leftMargin = u(1f) })
         box.addView(bt, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = u(1.2f) })
@@ -2029,6 +2030,7 @@ class MainActivity : Activity() {
 
     private var playlistRow: LinearLayout? = null
     private var shownPlaylists = -1
+    private var statusTicks = 0
 
     /** The pills, from the list chosen on the phone (Ajustes → Playlists da tela inicial). */
     private fun fillPlaylists() {
@@ -2277,7 +2279,8 @@ class MainActivity : Activity() {
         updateMusic()
         updateWeather()
         if (MusicPlaylists.version != shownPlaylists && playlistRow != null) fillPlaylists()
-        if (Adb.state == Adb.State.OK) loader.execute { WatchNext.refresh() }
+        // Rereads every 5 minutes anyway: no need to queue it every second
+        if (Adb.state == Adb.State.OK && statusTicks++ % 30 == 0) loader.execute { WatchNext.refresh() }
         refreshStremio()
         refreshYouTube()
 

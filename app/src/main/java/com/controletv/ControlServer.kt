@@ -450,6 +450,11 @@ class ControlServer(
                 ok()
             }
 
+            path == "/api/home/lock" && post -> {
+                val on = body(session).getBoolean("on")
+                val message = runCatching { HomeWatcher.setFullLock(context, on) }.getOrElse { "Precisa do controle completo (ADB) ativo: ${it.message}" }
+                ok(JSONObject().put("message", message).put("locked", HomeWatcher.fullLock(context)))
+            }
             path == "/api/home/layout" && !post -> ok(HomePrefs.describe(context))
 
             path == "/api/home/layout" && post -> {
@@ -528,6 +533,7 @@ class ControlServer(
             .put("lastPlay", PlayerActivity.lastPlay)
             .put("lastFields", PlayerActivity.lastFields)
             .put("homeLauncher", HomeWatcher.running && HomeWatcher.redirectHome(context))
+            .put("fullLock", HomeWatcher.fullLock(context))
             .put("screensaver", JSONObject()
                 .put("enabled", ScreenSaver.enabled(context))
                 .put("minutes", ScreenSaver.minutes(context))

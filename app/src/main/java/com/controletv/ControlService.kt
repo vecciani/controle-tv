@@ -61,6 +61,12 @@ class ControlService : Service() {
                     if (loops % 6 == 1 && !GooglePhotos.syncing) Thread { GooglePhotos.tick(this) }.start()
                     // Projector / TV box: make ours the default home screen once ADB is there
                     if (!askedHome && Adb.state == Adb.State.OK) { askedHome = true; HomeWatcher.ensureRealHome(this, withAdb = true) }
+                    // Ours is the home screen but the service went off (an update, a crash): back on
+                    if (!HomeWatcher.running && !askedService && Adb.state == Adb.State.OK &&
+                        getSharedPreferences("home", MODE_PRIVATE).getBoolean("redirect", false)) {
+                        askedService = true
+                        HomeWatcher.setEnabled(true)
+                    }
                     if (ScreenSaver.enabled(this) && Adb.state == Adb.State.OK) {
                         // The idle detection needs the accessibility service; photos need storage access
                         if (!HomeWatcher.running && !askedService) { askedService = true; HomeWatcher.enableForScreensaver(this) }
