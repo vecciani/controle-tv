@@ -966,7 +966,7 @@ function settingsSheet() {
       <button class="sheet-btn" id="s-player">${icon('play')}Player de vídeo</button>
       ${projector ? '' : `<button class="sheet-btn" id="s-playlists">${icon('music')}Playlists da tela inicial</button>`}
       ${projector ? '' : `<button class="sheet-btn" id="s-musicapp">${icon('music')}Música toca no: ${s.musicApp === 'smarttube' ? 'SmartTube' : 'AuraMusic'}</button>`}
-      ${projector ? '' : `<button class="sheet-btn${s.musicClip !== false ? ' on' : ''}" id="s-clip">${icon('music')}Clipe da música (tela inicial e descanso): ${s.musicClip !== false ? 'ligado' : 'desligado'}</button>`}
+      ${projector ? '' : `<button class="sheet-btn${s.musicClip !== false ? ' on' : ''}" id="s-clip">${icon('music')}Clipe da música no descanso: ${s.musicClip !== false ? 'ligado' : 'desligado'}</button>`}
     </div>
 
     <h4>Atualização</h4>
