@@ -961,7 +961,7 @@ function settingsSheet() {
     <h4>Tela ${projector ? 'do projetor' : 'da TV'}</h4>
     <div class="sheet-actions">
       <button class="sheet-btn${s.homeLauncher ? ' on' : ''}" id="s-home">${icon('house')}${s.homeLauncher ? 'Controle TV é a tela inicial (desligar)' : 'Usar o Controle TV como tela inicial'}</button>
-      ${projector ? '' : `<button class="sheet-btn${s.fullLock ? ' on' : ''}" id="s-lock">${icon('lock')}${s.fullLock ? 'Bloqueio total ligado (desfazer)' : 'Bloqueio total da tela da Amazon (experimental)'}</button>`}
+      ${projector ? '' : `<button class="sheet-btn${s.fullLock ? ' on' : ''}" id="s-lock">${icon('lock')}${s.fullLock ? 'Bloqueio total ligado (desfazer)' : s.lockRefused ? 'Bloqueio total: a Fire TV recusou (tocar tenta de novo)' : 'Bloqueio total da tela da Amazon (experimental)'}</button>`}
       <button class="sheet-btn" id="s-name">${icon('pencil')}Nome na saudação: <span id="s-name-value"></span></button>
       <button class="sheet-btn" id="s-saver">${icon('image')}Tela de descanso</button>
       <button class="sheet-btn" id="s-player">${icon('play')}Player de vídeo</button>
@@ -1073,6 +1073,7 @@ function settingsSheet() {
     }
     toast(on ? 'Ligando o bloqueio…' : 'Desfazendo…');
     try {
+      if (on && s.lockRefused) toast('Última resposta da TV: ' + s.lockRefused);
       const r = await api('/api/home/lock', { on });
       toast(r.message, on && !r.locked);
       await refreshStatus();
@@ -1119,6 +1120,7 @@ function diagnosticsSheet() {
     ${s.lastPlay ? `<div class="kv"><span>Último vídeo</span><span class="mono" id="d-last-play"></span></div>` : ''}
     ${s.lastFields ? `<div class="kv"><span>Campos do app</span><span class="mono" id="d-last-fields"></span></div>` : ''}
     <div class="sheet-actions" style="margin-top:12px">
+      <button class="sheet-btn primary" id="d-bench">${icon('play')}Aguenta filmes? Teste de desempenho</button>
       <button class="sheet-btn" id="d-probe">${icon('search')}Teste da conexão (ADB)</button>
       <button class="sheet-btn" id="d-system">${icon('settings')}Telas de configuração e entradas</button>
       <button class="sheet-btn" id="d-cec">${icon('power')}Teste do HDMI-CEC</button>
@@ -1133,6 +1135,7 @@ function diagnosticsSheet() {
     set('#d-air', `celular enviou ${native.airMouseSent?.() ?? 0} · TV recebeu ${s.airReceived ?? '?'}` +
       (s.airRejected ? ` · recusados ${s.airRejected}` : '') + (s.pointerProblem ? ` · ${s.pointerProblem}` : ''));
   }
+  sheetButton(sheet, 'd-bench', benchSheet);
   sheetButton(sheet, 'd-probe', probeSheet);
   sheetButton(sheet, 'd-cec', cecSheet);
   sheetButton(sheet, 'd-back', settingsSheet);
@@ -1149,6 +1152,61 @@ function diagnosticsSheet() {
         `Entradas (${r.inputs.length}):\n${r.inputs.join('\n') || 'nenhuma'}\n\nTelas do app de configurações (${r.screens.length}):\n${r.screens.join('\n')}`;
     } catch (e) { report.querySelector('#s-system-report').textContent = e.message; }
   });
+}
+
+/** Runs the performance test on the TV and shows what it can play. */
+async function benchSheet() {
+  const kind = state.status?.kind === 'projetor' ? 'o projetor' : 'a TV';
+  const sheet = openSheet(`
+    <div class="sheet-head"><div><h3>Aguenta filmes?</h3><p>Mede ${kind}: chip, vídeo, internet. Leva uns 40 segundos</p></div></div>
+    <div id="b-body"><p class="muted" id="b-step">Começando…</p></div>
+    <div class="sheet-actions">
+      <button class="sheet-btn" id="b-again">${icon('refresh')}Testar de novo</button>
+      <button class="sheet-btn" id="b-back">${icon('back')}Voltar</button>
+    </div>`);
+  sheetButton(sheet, 'b-back', diagnosticsSheet);
+  const body = sheet.querySelector('#b-body');
+  const esc = (v) => String(v ?? '–').replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+  const yes = (v) => (v ? 'sim' : 'não');
+  const show = (r) => {
+    const d = r.device || {};
+    const mark = { ok: 'check', warn: 'alert', bad: 'x' };
+    const verdict = (r.verdict || []).map((v) =>
+      `<div class="bench-line ${v.level}">${icon(mark[v.level] || 'alert')}<div><b>${esc(v.title)}</b><span>${esc(v.why)}</span></div></div>`).join('');
+    const codecs = (r.codecs || []).map((c) =>
+      `<div class="kv"><span>${esc(c.format)}</span><span>${c.decoder ? `${c.hardware ? 'no chip' : 'só software'} · 1080p60 ${yes(c['1080p60'])} · 4K ${yes(c['4k30'])}${c['10bit'] !== undefined ? ` · 10-bit ${yes(c['10bit'])}` : ''}` : 'não tem'}</span></div>`).join('');
+    const dec = (x) => x?.fps ? `${x.fps} quadros/s` : (x?.error ? `falhou: ${esc(x.error)}` : '–');
+    body.innerHTML = `${verdict}
+      <h4>Medições</h4>
+      <div class="kv"><span>Aparelho</span><span>${esc(d.model)} · Android ${esc(d.android)}</span></div>
+      <div class="kv"><span>Chip</span><span>${esc(d.chip)} · ${esc(d.cores)} núcleos${d.maxMHz ? ` · ${d.maxMHz} MHz` : ''}</span></div>
+      <div class="kv"><span>Memória</span><span>${esc(d.ramMB)} MB (livre ${esc(d.ramFreeMB)} MB)</span></div>
+      <div class="kv"><span>Tela</span><span>${esc(d.screen)}${d.hdr?.length ? ` · ${esc(d.hdr.join(', '))}` : ' · sem HDR'}</span></div>
+      <div class="kv"><span>Espaço livre</span><span>${esc(d.freeStorageMB)} MB</span></div>
+      <div class="kv"><span>Internet</span><span>${r.internetMbps != null ? `${r.internetMbps} Mbps` : 'não mediu'}</span></div>
+      <div class="kv"><span>1080p H.264</span><span>${dec(r.decodeH264)}</span></div>
+      <div class="kv"><span>1080p H.265</span><span>${dec(r.decodeH265)}</span></div>
+      <div class="kv"><span>Processador</span><span>${esc(r.cpu?.singleK)} mil/s (1 núcleo) · ${esc(r.cpu?.multiK)} mil/s (todos)</span></div>
+      <h4>Formatos de vídeo</h4>${codecs}`;
+  };
+  const poll = async () => {
+    for (let i = 0; i < 90 && sheet.isConnected; i++) {
+      try {
+        const r = await api('/api/bench');
+        if (!r.running && r.result && i > 0) return show(r.result);
+        const step = sheet.querySelector('#b-step');
+        if (step) step.textContent = r.running ? `Medindo: ${r.step}…` : 'Começando…';
+      } catch (e) { /* the TV is busy measuring: try again */ }
+      await new Promise((ok) => setTimeout(ok, 1500));
+    }
+  };
+  const start = async () => {
+    body.innerHTML = '<p class="muted" id="b-step">Começando…</p>';
+    try { await api('/api/bench', {}); } catch (e) { return toast(e.message, true); }
+    poll();
+  };
+  sheetButton(sheet, 'b-again', start);
+  start();
 }
 
 // ---------- Screensaver ----------

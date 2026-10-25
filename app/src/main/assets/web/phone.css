@@ -717,3 +717,14 @@ input, textarea, .report { -webkit-user-select: text; user-select: text; -webkit
 .paste-row .name-input { margin: 0; flex: 1; min-width: 0; }
 .paste-row .pill { flex: none; width: 48px; height: 48px; padding: 0; }
 .paste-row + .sheet-actions { margin-top: 18px; }
+
+/* Performance test verdict */
+.bench-line { display: flex; gap: 12px; align-items: flex-start; padding: 12px 14px; border-radius: 14px; margin-bottom: 8px; background: rgba(255,255,255,0.05); }
+.bench-line svg { flex: none; width: 22px; height: 22px; margin-top: 2px; }
+.bench-line div { display: flex; flex-direction: column; gap: 3px; }
+.bench-line span { color: var(--muted, #9aa); font-size: 13px; }
+.bench-line.ok svg { color: #34d399; }
+.bench-line.warn svg { color: #fbbf24; }
+.bench-line.bad svg { color: #f87171; }
+
+.muted { color: var(--muted, #9aa); }

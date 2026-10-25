@@ -264,6 +264,11 @@ class ControlServer(
             }
 
             path == "/api/debug/system" -> ok(SystemShortcuts.report(context))
+            path == "/api/bench" && post -> {
+                if (!Benchmark.running) Thread { runCatching { Benchmark.run(context) } }.start()
+                ok()
+            }
+            path == "/api/bench" -> ok(JSONObject().put("running", Benchmark.running).put("step", Benchmark.step).put("result", Benchmark.last))
 
             // Experiment: waking the Xbox over HDMI-CEC (see CecProbe)
             path == "/api/debug/cec" -> ok(CecProbe.report())
@@ -534,6 +539,7 @@ class ControlServer(
             .put("lastFields", PlayerActivity.lastFields)
             .put("homeLauncher", HomeWatcher.running && HomeWatcher.redirectHome(context))
             .put("fullLock", HomeWatcher.fullLock(context))
+            .put("lockRefused", HomeWatcher.lockRefused(context))
             .put("screensaver", JSONObject()
                 .put("enabled", ScreenSaver.enabled(context))
                 .put("minutes", ScreenSaver.minutes(context))

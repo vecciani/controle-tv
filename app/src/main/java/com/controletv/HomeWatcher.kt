@@ -186,43 +186,93 @@ class HomeWatcher : AccessibilityService() {
         }
 
         /** "Bloqueio total" (Fire TV): Amazon's home is switched off and ours is the only one. */
+        /** What Fire OS answered when it refused to switch its home off (null: not tried or worked). */
+        fun lockRefused(context: Context) = context.getSharedPreferences("home", Context.MODE_PRIVATE).getString("lockRefused", null)
+
         fun fullLock(context: Context) = context.getSharedPreferences("home", Context.MODE_PRIVATE).getString("lockedPkg", null) != null
 
+        /** The original home's activities that still answer Home (empty once it's locked out). */
+        private fun originalHomes(context: Context): List<ComponentName> =
+            context.packageManager.queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME), PackageManager.MATCH_ALL)
+                .map { ComponentName(it.activityInfo.packageName, it.activityInfo.name) }
+                .filter { it.packageName != context.packageName && isOriginalHome(context, it.packageName) }
+
         /**
-         * Switches Amazon's home app off (pm disable-user, undone with pm enable) so the TV has no
-         * home but ours: Home, boot and every app's exit land here, with nothing to redirect. Ours
-         * is made the home entry first, so the TV is never left without one. Needs ADB; newer
-         * Fire OS may refuse to switch its launcher off, which is reported. Returns a message.
+         * The ways to take Amazon's home out, mildest first, each with its undo. Fire OS refuses
+         * some of them (it blocks switching its launcher off since 2019); the next one is tried.
+         */
+        private fun lockMethods(pkg: String, homes: List<ComponentName>) = listOf(
+            Triple("disable", listOf("pm disable-user --user 0 $pkg"), listOf("pm enable $pkg")),
+            Triple("components",
+                homes.map { "pm disable-user --user 0 ${it.flattenToShortString()}" },
+                homes.map { "pm enable ${it.flattenToShortString()}" }),
+            Triple("hide", listOf("pm hide $pkg"), listOf("pm unhide $pkg")),
+            // Removed for this user only: the app stays on the TV and comes back with install-existing
+            Triple("uninstall", listOf("pm uninstall -k --user 0 $pkg"),
+                listOf("cmd package install-existing $pkg", "pm install-existing $pkg", "pm enable $pkg")),
+        )
+
+        /**
+         * "Bloqueio total": takes Amazon's home app out (every way Fire OS allows, mildest first)
+         * so the TV has no home but ours: Home, boot and every app's exit land here, with nothing
+         * to redirect. Ours is made the home entry first, so the TV is never left without one.
+         * Whether it worked is checked by asking Android who answers Home now. Needs ADB.
+         * Returns a message for the phone.
          */
         fun setFullLock(context: Context, on: Boolean): String {
             val prefs = context.getSharedPreferences("home", Context.MODE_PRIVATE)
             val alias = ComponentName(context, HOME_ALIAS)
             if (!on) {
                 val pkg = prefs.getString("lockedPkg", null) ?: return "O bloqueio total já está desligado"
-                val out = Adb.shell("pm enable $pkg")
-                if (!out.contains("enabled", ignoreCase = true)) return "A TV não religou a tela da Amazon: $out"
-                prefs.edit().remove("lockedPkg").apply()
+                val method = prefs.getString("lockMethod", "disable")
+                val homes = prefs.getString("lockedHomes", "").orEmpty().split(',').mapNotNull { ComponentName.unflattenFromString(it) }
+                val undo = lockMethods(pkg, homes).firstOrNull { it.first == method }?.third ?: listOf("pm enable $pkg")
+                undo.forEach { runCatching { Adb.shell(it) } }
                 homePackages = null
+                if (originalHomes(context).isEmpty()) return "A TV ainda não religou a tela da Amazon. Tente de novo em instantes."
+                prefs.edit().remove("lockedPkg").remove("lockMethod").remove("lockedHomes").apply()
                 if (isFireTv(context)) {
                     context.packageManager.setComponentEnabledSetting(alias, PackageManager.COMPONENT_ENABLED_STATE_DISABLED, PackageManager.DONT_KILL_APP)
                 }
                 return "Bloqueio desligado: a tela da Amazon voltou (o Home segue abrindo o Controle TV se a tela inicial estiver ligada)"
             }
-            val homeIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
-            val original = context.packageManager.queryIntentActivities(homeIntent, 0)
-                .map { it.activityInfo.packageName }.firstOrNull { isOriginalHome(context, it) }
-                ?: return "Não achei a tela inicial da Amazon nesta TV"
+            val homes = originalHomes(context)
+            val original = homes.firstOrNull()?.packageName ?: return "Não achei a tela inicial da Amazon nesta TV"
             // Ours becomes a home first: the TV must never be without one
             context.packageManager.setComponentEnabledSetting(alias, PackageManager.COMPONENT_ENABLED_STATE_ENABLED, PackageManager.DONT_KILL_APP)
             runCatching { Adb.shell("cmd package set-home-activity ${context.packageName}/$HOME_ALIAS") }
-            val out = Adb.shell("pm disable-user --user 0 $original")
-            if (!out.contains("disabled", ignoreCase = true)) {
-                return "A Fire TV não deixou desligar a tela da Amazon (${out.trim().take(120)}). O Home continua abrindo o Controle TV pelo modo normal."
+            val refused = mutableListOf<String>()
+            for ((method, lock, undo) in lockMethods(original, homes)) {
+                val out = lock.joinToString(" | ") { cmd -> runCatching { Adb.shell(cmd) }.getOrElse { e -> e.message.orEmpty() }.trim() }
+                homePackages = null
+                Thread.sleep(500)
+                if (originalHomes(context).isEmpty()) {
+                    prefs.edit().putString("lockedPkg", original).putString("lockMethod", method)
+                        .putString("lockedHomes", homes.joinToString(",") { it.flattenToShortString() })
+                        .putBoolean("redirect", true).remove("lockRefused").apply()
+                    runCatching { Adb.shell("cmd package set-home-activity ${context.packageName}/$HOME_ALIAS") }
+                    if (!running) setEnabled(true)
+                    return "Bloqueio total ligado ($method): a tela da Amazon saiu. Para desfazer, use o mesmo botão."
+                }
+                // Didn't take: put back whatever part of it did, then the next way
+                undo.forEach { runCatching { Adb.shell(it) } }
+                refused += "$method: ${out.take(80)}"
             }
-            prefs.edit().putString("lockedPkg", original).putBoolean("redirect", true).apply()
             homePackages = null
-            if (!running) setEnabled(true)
-            return "Bloqueio total ligado: a tela da Amazon foi desligada. Para desfazer, use o mesmo botão."
+            prefs.edit().putString("lockRefused", refused.joinToString(" · ").take(400)).apply()
+            return "A Fire TV recusou todos os jeitos de tirar a tela da Amazon (${refused.size} tentativas). O Home continua abrindo o Controle TV pelo modo normal."
+        }
+
+        /** Fire OS can bring its home back (an update, a reboot): taken out again the same way. */
+        fun keepLocked(context: Context) {
+            val prefs = context.getSharedPreferences("home", Context.MODE_PRIVATE)
+            val pkg = prefs.getString("lockedPkg", null) ?: return
+            homePackages = null
+            val homes = originalHomes(context)
+            if (homes.isEmpty()) return
+            val method = prefs.getString("lockMethod", "disable")
+            lockMethods(pkg, homes).firstOrNull { it.first == method }?.second?.forEach { runCatching { Adb.shell(it) } }
+            homePackages = null
         }
 
         /** Turns the service on or off through ADB (accessibility settings are "secure" settings). */
